@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="JEXCHAT — Application de messagerie sociale moderne créée par JEXREY">
+  <title>JEXCHAT</title>
+  <link rel="icon" href="logo.png" type="image/png">
+  <link rel="apple-touch-icon" href="logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="index">
+
+  <main class="auth-page">
+    <div class="auth-container">
+
+      <!-- Brand -->
+      <div class="auth-brand">
+        <div class="auth-logo">
+          <img src="logo.png" alt="JEXCHAT">
+        </div>
+        <h1>JEXCHAT</h1>
+        <p>Messagerie sociale moderne</p>
+      </div>
+
+      <!-- Saved Accounts -->
+      <div id="saved-accounts" class="saved-accounts card card-body hidden" style="margin-bottom:16px">
+        <div class="saved-accounts-title">Comptes enregistrés sur cet appareil</div>
+        <div id="saved-accounts-list"></div>
+        <button class="btn btn-ghost btn-sm" id="use-another" style="margin-top:8px;width:100%">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4v16m8-8H4"/></svg>
+          Utiliser un autre compte
+        </button>
+      </div>
+
+      <!-- Auth Card -->
+      <div class="auth-card" id="auth-card">
+        <!-- Tabs -->
+        <div class="auth-tabs">
+          <div class="auth-tab active" id="login-tab">Connexion</div>
+          <div class="auth-tab" id="register-tab">Inscription</div>
+        </div>
+
+        <!-- Login Form -->
+        <div id="login-form" class="auth-form">
+          <div class="input-group">
+            <label class="input-label" for="login-username">Pseudo</label>
+            <input type="text" class="input" id="login-username" placeholder="Votre pseudo" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32">
+          </div>
+          <div class="input-group">
+            <label class="input-label" for="login-password">Mot de passe</label>
+            <input type="password" class="input" id="login-password" placeholder="Mot de passe" autocomplete="current-password">
+          </div>
+          <div id="login-error" class="input-error hidden"></div>
+          <button class="btn btn-primary btn-lg w-full" id="login-submit">
+            Se connecter
+          </button>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-form" class="auth-form hidden">
+          <div class="input-group">
+            <label class="input-label" for="reg-username">Pseudo</label>
+            <input type="text" class="input" id="reg-username" placeholder="Choisissez un pseudo" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32">
+          </div>
+          <div class="input-group">
+            <label class="input-label" for="reg-password">Mot de passe</label>
+            <input type="password" class="input" id="reg-password" placeholder="Au moins 6 caractères" autocomplete="new-password">
+          </div>
+          <div class="input-group">
+            <label class="input-label" for="reg-confirm">Confirmer le mot de passe</label>
+            <input type="password" class="input" id="reg-confirm" placeholder="Répétez le mot de passe" autocomplete="new-password">
+          </div>
+          <div id="reg-error" class="input-error hidden"></div>
+          <button class="btn btn-primary btn-lg w-full" id="register-submit">
+            Créer le compte
+          </button>
+        </div>
+
+        <div class="auth-footer">
+          <a href="/informations">À propos de JEXCHAT</a>
+        </div>
+      </div>
+
+      <!-- Message Retention Info -->
+      <div class="msg-retention">
+        <svg width="20" height="20" fill="none" stroke="#3B6EF5" stroke-width="1.8" viewBox="0 0 24 24" style="flex-shrink:0;margin-top:1px">
+          <circle cx="12" cy="12" r="10"/>
+          <path stroke-linecap="round" d="M12 8v4M12 16h.01"/>
+        </svg>
+        <p class="msg-retention-text">
+          <strong>Conservation des messages :</strong> Tous les messages sont automatiquement supprimés 5 jours après leur envoi. Cette durée est fixe et ne peut pas être modifiée.
+        </p>
+      </div>
+
+    </div>
+  </main>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="script.js"></script>
+  <script>
+    // Show/hide "Utiliser un autre compte" button
+    document.getElementById('use-another')?.addEventListener('click', () => {
+      document.getElementById('saved-accounts')?.classList.add('hidden');
+      document.getElementById('auth-card')?.classList.remove('hidden');
+    });
+  </script>
+
+</body>
+</html>

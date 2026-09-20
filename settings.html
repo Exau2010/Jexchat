@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JEXCHAT — Paramètres</title>
+  <link rel="icon" href="logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="settings">
+
+  <div class="settings-page">
+
+    <!-- Header -->
+    <header class="settings-header">
+      <button class="btn-icon" id="settings-back" title="Retour">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h1>Paramètres</h1>
+    </header>
+
+    <div class="settings-content">
+
+      <!-- Compte -->
+      <div class="settings-section">
+        <div class="settings-section-title">Compte</div>
+        <div class="settings-group">
+          <div class="settings-row no-hover">
+            <div class="settings-row-icon purple">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Pseudo</div>
+              <div class="settings-row-desc" id="settings-username">Chargement...</div>
+            </div>
+          </div>
+          <div class="settings-row" id="change-username-btn">
+            <div class="settings-row-icon blue">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Changer de pseudo</div>
+            </div>
+            <div class="settings-chevron">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+          <div class="settings-row" id="change-password-btn">
+            <div class="settings-row-icon green">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path stroke-linecap="round" d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Changer le mot de passe</div>
+            </div>
+            <div class="settings-chevron">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Apparence -->
+      <div class="settings-section">
+        <div class="settings-section-title">Apparence</div>
+        <div class="settings-group">
+          <div class="settings-row no-hover">
+            <div class="settings-row-icon purple">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="5"/>
+                <path stroke-linecap="round" d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Mode sombre</div>
+              <div class="settings-row-desc">Adapte l'interface à la luminosité</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="theme-toggle">
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+          <div class="settings-row no-hover">
+            <div class="settings-row-icon blue">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--color-primary)">
+                <circle cx="12" cy="12" r="8"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Couleur principale</div>
+            </div>
+          </div>
+          <div class="color-options" id="accent-colors"></div>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      <div class="settings-section">
+        <div class="settings-section-title">Notifications</div>
+        <div class="settings-group">
+          <div class="settings-row no-hover">
+            <div class="settings-row-icon orange">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Notifications push</div>
+              <div class="settings-row-desc">Recevoir des notifications même hors ligne</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="notif-toggle" checked>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confidentialité -->
+      <div class="settings-section">
+        <div class="settings-section-title">Confidentialité</div>
+        <div class="settings-group">
+          <div class="settings-row no-hover">
+            <div class="settings-row-icon gray">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Afficher mon statut en ligne</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="online-status-toggle" checked>
+              <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Partage -->
+      <div class="settings-section">
+        <div class="settings-section-title">Partage</div>
+        <div class="settings-group">
+          <div class="settings-row" id="share-site-btn">
+            <div class="settings-row-icon blue">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <path stroke-linecap="round" d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Partager JEXCHAT</div>
+              <div class="settings-row-desc">Inviter quelqu'un à rejoindre l'application</div>
+            </div>
+          </div>
+          <div class="settings-row" id="share-profile-btn">
+            <div class="settings-row-icon purple">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Partager mon profil</div>
+              <div class="settings-row-desc">Envoyer un lien direct vers votre profil</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sécurité -->
+      <div class="settings-section">
+        <div class="settings-section-title">Sécurité</div>
+        <div class="settings-group">
+          <div class="settings-row" id="sessions-btn">
+            <div class="settings-row-icon blue">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="14" rx="2"/>
+                <path stroke-linecap="round" d="M8 21h8M12 17v4"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Sessions actives</div>
+              <div class="settings-row-desc">Gérer les appareils connectés</div>
+            </div>
+            <div class="settings-chevron">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </div>
+        <!-- Sessions list (shown inline) -->
+        <div class="settings-group mt-2" id="sessions-list" style="display:none;margin-top:8px"></div>
+      </div>
+
+      <!-- Comptes bloqués -->
+      <div class="settings-section">
+        <div class="settings-section-title">Comptes bloqués</div>
+        <div class="settings-group">
+          <div class="settings-row" id="blocked-users-btn">
+            <div class="settings-row-icon red">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path stroke-linecap="round" d="M4.93 4.93l14.14 14.14"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Utilisateurs bloqués</div>
+            </div>
+            <div class="settings-chevron">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </div>
+        <div class="settings-group mt-2" id="blocked-list" style="display:none;margin-top:8px;padding:12px 16px"></div>
+      </div>
+
+      <!-- Comptes enregistrés -->
+      <div class="settings-section">
+        <div class="settings-section-title">Comptes enregistrés sur cet appareil</div>
+        <div class="settings-group">
+          <div class="settings-row no-hover" style="flex-direction:column;align-items:flex-start;gap:8px">
+            <div id="saved-accounts-settings" style="width:100%">
+              <div class="skeleton" style="height:40px;border-radius:8px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sessions -->
+      <div class="settings-section">
+        <div class="settings-section-title">Connexion</div>
+        <div class="settings-group">
+          <div class="settings-row" id="logout-btn">
+            <div class="settings-row-icon gray">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Se déconnecter</div>
+            </div>
+          </div>
+          <div class="settings-row" id="logout-all-btn">
+            <div class="settings-row-icon red">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Déconnecter tous les appareils</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Zone dangereuse -->
+      <div class="settings-section">
+        <div class="settings-section-title">Zone dangereuse</div>
+        <div class="settings-group danger-zone">
+          <div class="settings-row" id="delete-account-btn">
+            <div class="settings-row-icon red">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </div>
+            <div class="settings-row-content">
+              <div class="settings-row-label">Supprimer le compte</div>
+              <div class="settings-row-desc">Cette action est irréversible</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info link -->
+      <div style="text-align:center;margin-top:32px">
+        <a href="/informations" style="color:var(--color-text-tertiary);font-size:0.875rem">À propos de JEXCHAT</a>
+      </div>
+
+    </div>
+
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="script.js"></script>
+  <script>
+    // Sessions toggle
+    document.getElementById('sessions-btn')?.addEventListener('click', async function() {
+      const list = document.getElementById('sessions-list');
+      if (list.style.display === 'none') {
+        list.style.display = 'block';
+        await loadSessions();
+      } else {
+        list.style.display = 'none';
+      }
+    });
+
+    // Blocked users toggle
+    document.getElementById('blocked-users-btn')?.addEventListener('click', async function() {
+      const list = document.getElementById('blocked-list');
+      if (list.style.display === 'none') {
+        list.style.display = 'block';
+        await loadBlockedUsers();
+      } else {
+        list.style.display = 'none';
+      }
+    });
+
+    // Settings username display
+    document.addEventListener('DOMContentLoaded', () => {
+      const unameEl = document.getElementById('settings-username');
+      if (unameEl) {
+        fetch('/api/auth/me', { credentials: 'include' })
+          .then(r => r.json())
+          .then(u => { if (unameEl) unameEl.textContent = u.username || ''; })
+          .catch(() => {});
+      }
+    });
+  </script>
+
+</body>
+</html>

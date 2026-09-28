@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JEXCHAT — Administration</title>
+  <link rel="icon" href="logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="admin">
+
+  <div class="admin-page">
+
+    <!-- Header -->
+    <header class="admin-header">
+      <button class="btn-icon" id="admin-back" title="Retour">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h1>Administration</h1>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="role-badge role-ADMIN" id="admin-role-badge">Admin</span>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="admin-tabs">
+      <div class="admin-tab active" data-panel="panel-users">Utilisateurs</div>
+      <div class="admin-tab" data-panel="panel-reports">Signalements</div>
+      <div class="admin-tab" data-panel="panel-posts">Publications</div>
+      <div class="admin-tab" data-panel="panel-stats">Statistiques</div>
+    </div>
+
+    <!-- Content -->
+    <div class="admin-content">
+
+      <!-- Users Panel -->
+      <div class="admin-panel active" id="panel-users">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="font-size:1rem;font-weight:700">Utilisateurs</h2>
+          <button class="btn btn-ghost btn-sm" onclick="loadAdminUsers(0)">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Actualiser
+          </button>
+        </div>
+        <div class="admin-table" id="admin-users-list">
+          <div class="flex items-center justify-center" style="padding:48px">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reports Panel -->
+      <div class="admin-panel" id="panel-reports">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="font-size:1rem;font-weight:700">Signalements en attente</h2>
+          <div class="flex gap-2">
+            <select class="input" id="report-filter" style="padding:6px 12px;height:auto;width:auto;border-radius:20px">
+              <option value="pending">En attente</option>
+              <option value="reviewed">Examinés</option>
+              <option value="resolved">Résolus</option>
+              <option value="dismissed">Ignorés</option>
+              <option value="all">Tous</option>
+            </select>
+          </div>
+        </div>
+        <div class="admin-table" id="admin-reports-list">
+          <div class="flex items-center justify-center" style="padding:48px">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Publications Panel -->
+      <div class="admin-panel" id="panel-posts">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="font-size:1rem;font-weight:700">Publications</h2>
+          <button class="btn btn-ghost btn-sm" onclick="loadAdminPosts(0)">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Actualiser
+          </button>
+        </div>
+        <div class="admin-table" id="admin-posts-list">
+          <div class="flex items-center justify-center" style="padding:48px">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Panel -->
+      <div class="admin-panel" id="panel-stats">
+        <h2 style="font-size:1rem;font-weight:700;margin-bottom:16px">Statistiques</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">
+          <div class="card card-body" style="text-align:center">
+            <div style="font-size:2rem;font-weight:800;color:var(--color-primary)" id="stat-users">—</div>
+            <div class="text-secondary text-sm">Utilisateurs</div>
+          </div>
+          <div class="card card-body" style="text-align:center">
+            <div style="font-size:2rem;font-weight:800;color:var(--color-online)" id="stat-online">—</div>
+            <div class="text-secondary text-sm">En ligne</div>
+          </div>
+          <div class="card card-body" style="text-align:center">
+            <div style="font-size:2rem;font-weight:800;color:var(--color-warning)" id="stat-reports">—</div>
+            <div class="text-secondary text-sm">Signalements</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="card-body">
+            <h3 style="font-size:0.9375rem;font-weight:700;margin-bottom:12px">Informations système</h3>
+            <div class="settings-row no-hover" style="padding:8px 0">
+              <div class="settings-row-content">
+                <div class="settings-row-label">Conservation des messages</div>
+                <div class="settings-row-desc">5 jours après création</div>
+              </div>
+            </div>
+            <div class="settings-row no-hover" style="padding:8px 0">
+              <div class="settings-row-content">
+                <div class="settings-row-label">Version</div>
+                <div class="settings-row-desc">JEXCHAT 1.0.0</div>
+              </div>
+            </div>
+            <div class="settings-row no-hover" style="padding:8px 0">
+              <div class="settings-row-content">
+                <div class="settings-row-label">Entreprise</div>
+                <div class="settings-row-desc">JEXREY</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="script.js"></script>
+  <script>
+    // Report filter
+    document.getElementById('report-filter')?.addEventListener('change', async function() {
+      const container = document.getElementById('admin-reports-list');
+      if (!container) return;
+      container.innerHTML = '<div class="flex items-center justify-center" style="padding:48px"><div class="spinner"></div></div>';
+      try {
+        const reports = await api('GET', `/api/admin/reports?status=${this.value}`);
+        container.innerHTML = '';
+        if (reports.length === 0) {
+          container.innerHTML = '<div class="empty-state" style="padding:32px"><p>Aucun signalement</p></div>';
+          return;
+        }
+        reports.forEach(r => {
+          const el = document.createElement('div');
+          el.className = 'admin-table-row';
+          el.style.flexDirection = 'column';
+          el.style.alignItems = 'flex-start';
+          el.innerHTML = `
+            <div style="width:100%;display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <span class="role-badge role-USER">${r.targetType}</span>
+                <span class="text-secondary text-sm" style="margin-left:8px">${new Date(r.createdAt).toLocaleDateString('fr-FR')}</span>
+                <span class="status-badge status-${r.status === 'pending' ? 'suspended' : r.status === 'resolved' ? 'active' : 'banned'}" style="margin-left:8px">${r.status}</span>
+              </div>
+              ${r.status === 'pending' ? `<div class="flex gap-2">
+                <button class="btn btn-ghost btn-sm" onclick="resolveReport('${r._id}','resolved')">Résoudre</button>
+                <button class="btn btn-ghost btn-sm" onclick="resolveReport('${r._id}','dismissed')">Ignorer</button>
+              </div>` : ''}
+            </div>
+            <p class="text-sm text-secondary" style="margin-top:6px">${r.reason || ''}</p>`;
+          container.appendChild(el);
+        });
+      } catch (err) {
+        container.innerHTML = '<div class="empty-state" style="padding:32px"><p>Erreur de chargement</p></div>';
+      }
+    });
+
+    // Load stats
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const users = await api('GET', '/api/admin/users?skip=0');
+        document.getElementById('stat-users').textContent = users.length;
+        const online = await api('GET', '/api/users/online');
+        document.getElementById('stat-online').textContent = online.length;
+        const reports = await api('GET', '/api/admin/reports?status=pending');
+        document.getElementById('stat-reports').textContent = reports.length;
+
+        // Set admin role badge
+        const user = await api('GET', '/api/auth/me');
+        const badge = document.getElementById('admin-role-badge');
+        if (badge) {
+          const role = user.roles?.[0] || 'USER';
+          badge.textContent = role;
+          badge.className = `role-badge role-${role}`;
+        }
+      } catch {}
+    });
+  </script>
+
+</body>
+</html>

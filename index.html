@@ -95,11 +95,11 @@
   <div class="screen" id="profile">
     <div class="pheader">
       <div class="avatar" id="p-avatar" style="width:82px;height:82px;font-size:20px"></div>
-      <div class="pstats"><div><b id="p-count">0</b><span>Publications</span></div></div>
+      <div class="pstats"><div><b id="p-count">0</b><span>Publications</span></div><div><b id="p-likes">0</b><span>J'aime</span></div></div>
     </div>
     <div class="pinfo">
       <div><h2 id="p-name"></h2><div class="handle" id="p-handle"></div></div>
-      <button class="tapbtn hidden" id="p-settings" aria-label="Paramètres"><i data-ic="gear"></i></button>
+      <button class="tapbtn hidden" id="p-settings" data-nav="settings" aria-label="Paramètres"><i data-ic="gear"></i></button>
     </div>
     <div class="prow" id="p-actions"></div>
     <div class="tabs">
@@ -240,7 +240,7 @@
   <textarea class="field" id="post-content" rows="3" maxlength="2000" placeholder="Quoi de neuf ?"></textarea>
   <div class="field-label">Type de média</div>
   <select class="field" id="post-media-type"><option value="none">Aucun</option><option value="image">Image (URL)</option><option value="video">Vidéo (URL)</option><option value="link">Lien</option></select>
-  <div id="post-url-row" style="display:none"><div class="field-label">URL (HTTPS)</div><input class="field" id="post-url" placeholder="https://…"></div>
+  <div id="post-url-row" style="display:none"><div class="field-label">URL (HTTPS)</div><input class="field" id="post-url" placeholder="https://…"><p class="note" style="margin:6px 2px 0;font-size:11.5px;color:var(--sub)">Doit pointer directement vers un fichier (ex: se terminant par .jpg/.png/.mp4) — un lien vers une page web ne fonctionnera pas. Ex : https://picsum.photos/800/600</p></div>
   <div class="field-label">Description <span style="font-weight:400;color:var(--sub)">(optionnelle, 300 caractères max)</span></div>
   <textarea class="field" id="post-desc" rows="2" maxlength="300"></textarea>
   <p class="errmsg" id="post-err"></p>

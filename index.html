@@ -5,36 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="JEXCHAT — réseau social et messagerie en temps réel">
 <title>Jexchat</title>
-<link rel="icon" href="/logo.png" type="image/png">
-<link rel="apple-touch-icon" href="/logo.png">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0057ff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Jexchat">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/jexchat.css">
 </head>
 <body>
+<div class="netbar" id="netbar" role="status" aria-live="polite"></div>
 <div class="shell">
 <nav class="sidebar" id="sidebar">
-  <div class="brand"><img src="/logo.png" alt=""><b>Jexchat</b></div>
+  <div class="brand"><img src="/icon-192.png" alt="" width="32" height="32"><b>Jexchat</b></div>
   <button class="navbtn" data-nav="feed"><i data-ic="home"></i><span class="label">Accueil</span></button>
   <button class="navbtn off" data-nav="explore"><i data-ic="search"></i><span class="label">Explorer</span></button>
   <button class="navbtn off" data-nav="messages" style="position:relative"><span class="badge hidden" data-msgbadge></span><i data-ic="msg"></i><span class="label">Messages</span></button>
   <button class="navbtn off" data-nav="notifs" style="position:relative"><span class="badge hidden" data-notifbadge></span><i data-ic="bell"></i><span class="label">Notifications</span></button>
   <button class="navbtn off" data-nav="profile"><i data-ic="user"></i><span class="label">Profil</span></button>
   <button class="btn primary" style="margin-top:16px" id="btn-publish">Publier</button>
+  <button class="navbtn off hidden" id="nav-install" type="button"><i data-ic="download"></i><span class="label">Installer l'application</span></button>
 </nav>
 
 <div class="app" id="app">
   <div class="topbar">
-    <div class="brand"><img src="/logo.png" alt=""><b>Jexchat</b></div>
+    <div class="brand"><img src="/icon-192.png" alt="" width="32" height="32"><b>Jexchat</b></div>
     <div class="icons">
       <button class="tapbtn" aria-label="Rechercher" data-nav="explore"><i data-ic="search"></i></button>
+      <button class="tapbtn hidden" aria-label="Installer l'application Jexchat" id="btn-install" type="button"><i data-ic="download"></i></button>
       <button class="tapbtn" aria-label="Notifications" data-nav="notifs" style="position:relative"><span class="badge hidden" data-notifbadge></span><i data-ic="bell"></i></button>
     </div>
   </div>
 
   <!-- ACCUEIL -->
   <div class="screen" id="feed">
+    <div class="pushbanner hidden" id="pushbanner"><i data-ic="bell"></i><div><b>Ne ratez plus un message</b><small>Activez les notifications pour être prévenu même hors de Jexchat.</small></div><button class="btn primary sm" id="push-enable" type="button">Activer</button><button class="tapbtn" id="push-dismiss" type="button" aria-label="Plus tard"><i data-ic="x"></i></button></div>
     <div class="stories" id="onlineStrip"></div>
     <div class="composer">
       <div class="avatar avatar-sm" data-me-avatar></div>
@@ -52,7 +62,7 @@
   <!-- EXPLORER -->
   <div class="screen" id="explore">
     <div class="pagehead"><h1>Explorer</h1></div>
-    <div class="searchbar"><i data-ic="search"></i><input id="searchInput" placeholder="Rechercher des comptes…" autocomplete="off"></div>
+    <div class="searchbar"><i data-ic="search"></i><input id="searchInput" placeholder="Rechercher des comptes ou des publications…" autocomplete="off"></div>
     <div id="searchResults"></div>
     <div class="section-label" id="suggLabel" style="padding-top:0">Suggestions de comptes</div>
     <div class="suggrow" id="suggRow"></div>
@@ -148,8 +158,9 @@
       <label class="toggle"><input type="checkbox" id="s-dark"><span class="ttrack"><span class="tthumb"></span></span></label></div>
     <div class="setrow" style="cursor:default"><div style="margin-bottom:8px">Couleur principale</div>
       <div class="swatches" id="s-swatches"></div></div>
-    <div class="setrow" style="cursor:default"><div style="margin-bottom:8px">Police des messages</div>
-      <select class="field" id="s-font" style="margin:0"><option value="default">Par défaut</option><option value="rounded">Arrondie</option><option value="mono">Monospace</option></select></div>
+    <div class="setrow" style="cursor:default"><div style="margin-bottom:8px">Police du texte</div>
+      <select class="field" id="s-font" style="margin:0 0 10px" aria-describedby="s-font-preview"></select>
+      <div class="fontpreview" id="s-font-preview">Aa — Voici un aperçu de cette police.</div></div>
 
     <div class="section-label">Notifications</div>
     <div class="setrow" style="display:flex;justify-content:space-between;cursor:default"><span>Notifications push</span>
@@ -191,9 +202,11 @@
   <!-- CONNEXION -->
   <div class="screen" id="auth">
     <div class="authhero">
-      <div class="herobadge"><img alt="Jexchat" src="/logo.png"></div>
+      <i class="blob b1" aria-hidden="true"></i><i class="blob b2" aria-hidden="true"></i><i class="blob b3" aria-hidden="true"></i>
+      <div class="herobadge"><img alt="Jexchat" src="/icon-192.png" width="64" height="64"></div>
       <h1>Jexchat</h1>
       <p>Retrouve tes proches, sans bruit ni publicité</p>
+      <ul class="heropoints"><li>Messages en temps réel</li><li>Sans publicité</li><li>Messages supprimés après 5 jours</li></ul>
     </div>
     <div class="authcard">
       <div class="authseg"><button class="on" data-authview="login">Connexion</button><button data-authview="signup">Inscription</button></div>
@@ -218,7 +231,8 @@
 
   <div class="screen" id="accounts">
     <div class="authhero">
-      <div class="herobadge"><img alt="Jexchat" src="/logo.png"></div>
+      <i class="blob b1" aria-hidden="true"></i><i class="blob b2" aria-hidden="true"></i><i class="blob b3" aria-hidden="true"></i>
+      <div class="herobadge"><img alt="Jexchat" src="/icon-192.png" width="64" height="64"></div>
       <h1>Comptes enregistrés</h1><p>Sur cet appareil — 5 comptes maximum</p>
     </div>
     <div class="authcard">
@@ -237,7 +251,11 @@
 </div>
 
 <aside class="rightpanel" id="rightpanel">
-  <div style="font-size:13px;font-weight:700;margin-bottom:16px">Suggestions pour vous</div>
+  <div class="rp-title">Suggestions pour vous</div>
+  <div class="rp-sub">Des sites gratuits et utiles, triés pour vous</div>
+  <div class="sitecards" id="rightSites"></div>
+  <p class="rp-note">Sites externes, indépendants de Jexchat.</p>
+  <div class="rp-title rp-title2" id="rightOnlineTitle">Personnes en ligne</div>
   <div id="rightSugg"></div>
 </aside>
 </div>
@@ -272,6 +290,13 @@
 </div></div>
 
 <div class="overlay" id="sheet"><div class="sheet actions" id="sheetBody"></div></div>
+
+<div class="overlay" id="installsheet"><div class="sheet">
+  <button class="tapbtn close" data-close aria-label="Fermer"><i data-ic="x"></i></button>
+  <h3>Installer Jexchat</h3>
+  <p style="font-size:13.5px;color:var(--sub);margin-top:0" id="install-intro">Ajoutez Jexchat à votre écran d'accueil pour l'ouvrir comme une application, en plein écran.</p>
+  <div id="install-steps" class="installsteps"></div>
+</div></div>
 
 <div class="overlay" id="pwsheet"><div class="sheet">
   <button class="tapbtn close" data-close aria-label="Fermer"><i data-ic="x"></i></button>

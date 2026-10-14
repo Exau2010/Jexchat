@@ -29,7 +29,21 @@ async function api(method, path, body) {
   if (state.token) headers['X-Session-Token'] = state.token;
   const opts = { method, headers, credentials: 'include' };
   if (body !== undefined && method !== 'GET') opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
+  // Connexion instable : délai maximal par requête (jamais d'attente infinie) et
+  // un second essai automatique pour les lectures (GET) uniquement — une écriture
+  // n'est jamais rejouée ici (les envois de messages ont leur propre file d'attente).
+  const attempts = method === 'GET' ? 2 : 1;
+  let res;
+  for (let i = 0; i < attempts; i++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try { res = await fetch(path, { ...opts, signal: ctl.signal }); clearTimeout(timer); break; }
+    catch (e) {
+      clearTimeout(timer);
+      if (i === attempts - 1) throw Object.assign(new Error(navigator.onLine === false ? 'Vous êtes hors connexion.' : 'Connexion instable — réessayez.'), { network: true });
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || 'Erreur réseau.'), { status: res.status });
   return data;
@@ -67,6 +81,7 @@ const ICONS = {
   smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
   bg: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
 };
 function icon(name, size = 22) {
   return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -112,7 +127,13 @@ function escText(str) {
   const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML;
 }
 function linkify(html) {
-  return html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  return html.replace(/(https?:\/\/[^\s<]+)/g, (raw) => {
+    let u;
+    try { u = new URL(raw); } catch { return escText(raw); }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return escText(raw);
+    const safe = escText(u.href);
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`;
+  });
 }
 function formatTime(d) { return new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function formatDay(d) {
@@ -140,6 +161,41 @@ function toast(msg) {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 2600);
 }
 
+/* ================= Polices du texte ================= */
+// Aucune police n'est téléchargée au démarrage sauf celle choisie : la feuille de
+// style Google Fonts de la police sélectionnée est ajoutée à la demande, une seule fois.
+const JX_FONTS = {
+  default:   { label: 'Par défaut (Inter)', css: "Inter,system-ui,-apple-system,sans-serif" },
+  rounded:   { label: 'Arrondie douce', css: "'Nunito',ui-rounded,system-ui,sans-serif", g: 'Nunito:wght@400;600;700' },
+  mono:      { label: 'Monospace', css: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" },
+  nunito:    { label: 'Nunito — amicale', css: "'Nunito',system-ui,sans-serif", g: 'Nunito:wght@400;600;700' },
+  poppins:   { label: 'Poppins — moderne', css: "'Poppins',system-ui,sans-serif", g: 'Poppins:wght@400;500;600' },
+  quicksand: { label: 'Quicksand — légère', css: "'Quicksand',system-ui,sans-serif", g: 'Quicksand:wght@400;600;700' },
+  fredoka:   { label: 'Fredoka — joyeuse', css: "'Fredoka',system-ui,sans-serif", g: 'Fredoka:wght@400;500;600' },
+  baloo:     { label: 'Baloo — rebondie', css: "'Baloo 2',system-ui,sans-serif", g: 'Baloo+2:wght@400;600;700' },
+  comic:     { label: 'Comic Neue — décontractée', css: "'Comic Neue','Comic Sans MS',system-ui,sans-serif", g: 'Comic+Neue:wght@400;700' },
+  caveat:    { label: 'Caveat — manuscrite', css: "'Caveat','Segoe Print',cursive", g: 'Caveat:wght@400;600;700' },
+  patrick:   { label: 'Patrick Hand — écriture', css: "'Patrick Hand','Segoe Print',cursive", g: 'Patrick+Hand' },
+  pacifico:  { label: 'Pacifico — rigolote', css: "'Pacifico',cursive", g: 'Pacifico' },
+  lobster:   { label: 'Lobster — rétro', css: "'Lobster',cursive", g: 'Lobster' },
+  chewy:     { label: 'Chewy — BD', css: "'Chewy',cursive", g: 'Chewy' },
+  special:   { label: 'Special Elite — machine à écrire', css: "'Special Elite','Courier New',monospace", g: 'Special+Elite' },
+  merri:     { label: 'Merriweather — élégante', css: "'Merriweather',Georgia,serif", g: 'Merriweather:wght@400;700' },
+};
+function applyFont(key) {
+  const f = JX_FONTS[key] || JX_FONTS.default;
+  if (f.g && !document.querySelector(`link[data-jxfont="${key in JX_FONTS ? key : 'default'}"]`)) {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet'; l.dataset.jxfont = key;
+    l.href = `https://fonts.googleapis.com/css2?family=${f.g}&display=swap`;
+    document.head.appendChild(l);
+  }
+  document.documentElement.style.setProperty('--ui-font', f.css);
+  try { localStorage.setItem('jx_font', key in JX_FONTS ? key : 'default'); } catch {}
+}
+// Application immédiate au démarrage (valeur gardée en local), avant même la connexion.
+try { applyFont(localStorage.getItem('jx_font') || 'default'); } catch {}
+
 /* ================= Theme ================= */
 function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light'); }
 function applyAccent(color) {
@@ -153,6 +209,13 @@ function show(id) {
   // Sortie de la page Notifications : les notifications consultées sont lues puis supprimées (serveur).
   const prevScreen = document.querySelector('.screen.active');
   if (prevScreen && prevScreen.id === 'notifs' && id !== 'notifs') flushNotifications();
+  // Quitter la discussion (bouton Retour, autre onglet…) : on quitte aussi sa « salle » Socket.IO et on
+  // oublie la conversation active. Avant, le serveur croyait l'utilisateur encore dans la discussion
+  // et n'envoyait plus ni notification ni push pour cette conversation.
+  if (prevScreen && prevScreen.id === 'chat' && id !== 'chat' && state.currentConvId) {
+    state.socket?.emit('leave_conversation', state.currentConvId);
+    state.currentConvId = null;
+  }
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
@@ -186,14 +249,20 @@ document.addEventListener('click', (e) => {
 // Petits sons synthétisés (Web Audio) : aucun fichier à charger, aucun coût réseau.
 // Désactivables dans Paramètres ; préférence aussi gardée en local pour s'appliquer dès l'ouverture.
 const jxSound = (() => {
-  let ctx = null, last = 0, navStep = 0;
+  let ctx = null, master = null, last = 0;
   const enabled = () => { try { return localStorage.getItem('jx_sounds') !== '0'; } catch { return true; } };
   const setEnabled = (on) => { try { localStorage.setItem('jx_sounds', on ? '1' : '0'); } catch {} };
   function ac() {
     if (ctx) return ctx;
     const C = window.AudioContext || window.webkitAudioContext;
     if (!C) return null;
-    try { ctx = new C(); } catch { return null; }
+    try {
+      ctx = new C();
+      // Chaîne commune : léger filtre passe-bas (timbre doux, jamais strident) + volume maître.
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3400;
+      master = ctx.createGain(); master.gain.value = 0.9;
+      master.connect(lp); lp.connect(ctx.destination);
+    } catch { ctx = null; return null; }
     return ctx;
   }
   // note : [fréquence Hz, début s, durée s, type, volume]
@@ -207,29 +276,38 @@ const jxSound = (() => {
       o.type = type || 'sine';
       o.frequency.setValueAtTime(f, t0 + at);
       g.gain.setValueAtTime(0.0001, t0 + at);
-      g.gain.exponentialRampToValueAtTime(vol || 0.12, t0 + at + 0.012);
+      g.gain.exponentialRampToValueAtTime(vol || 0.07, t0 + at + 0.014);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + d);
-      o.connect(g); g.connect(c.destination);
+      o.connect(g); g.connect(master);
       o.start(t0 + at); o.stop(t0 + at + d + 0.03);
     });
   }
-  // Gamme pentatonique : chaque appui sur la barre de navigation monte d'une note → on a envie de rejouer.
-  const PENTA = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
+  // Hiérarchie sonore (du plus discret au plus marqué), toutes dans la même gamme :
+  //  1. tap       micro-retour d'un appui ordinaire (très léger)
+  //  2. nav       une note FIXE par onglet → chaque onglet a « sa » note, reconnaissable
+  //  3. open/back entrer / sortir d'un écran (paire montante / descendante)
+  //  4. on/off    bascule d'un réglage (montant = activé, descendant = désactivé)
+  //  5. send/like confirmations (deux notes montantes : « c'est fait »)
+  //  6. bell      notifications (carillon cristallin), story (arpège)
+  const NAV = { feed: 523.25, explore: 587.33, messages: 659.25, profile: 783.99 };
   const sounds = {
-    nav() { const f = PENTA[navStep++ % PENTA.length]; play([[f, 0, 0.11, 'sine', 0.13], [f * 2, 0.012, 0.07, 'triangle', 0.04]]); },
-    tap() { play([[740, 0, 0.07, 'sine', 0.1]]); },
-    bell() { play([[1318.5, 0, 0.18, 'sine', 0.12], [1760, 0.07, 0.22, 'sine', 0.09]]); },
-    story() { play([[587.33, 0, 0.09, 'triangle', 0.1], [880, 0.07, 0.09, 'triangle', 0.1], [1174.7, 0.14, 0.16, 'triangle', 0.09]]); },
-    like() { play([[659.25, 0, 0.08, 'sine', 0.13], [987.77, 0.06, 0.16, 'sine', 0.12]]); },
-    send() { play([[493.88, 0, 0.07, 'sine', 0.11], [740, 0.06, 0.13, 'sine', 0.11]]); },
-    toggle() { play([[880, 0, 0.05, 'square', 0.04], [1174.7, 0.05, 0.07, 'square', 0.04]]); },
-    open() { play([[440, 0, 0.08, 'sine', 0.1], [659.25, 0.06, 0.12, 'sine', 0.1]]); },
+    tap() { play([[698.46, 0, 0.06, 'sine', 0.045]]); },
+    nav(k) { const f = NAV[k] || 587.33; play([[f, 0, 0.12, 'sine', 0.08], [f * 1.5, 0.03, 0.09, 'sine', 0.028]]); },
+    open() { play([[440, 0, 0.07, 'sine', 0.06], [587.33, 0.05, 0.1, 'sine', 0.06]]); },
+    back() { play([[587.33, 0, 0.06, 'sine', 0.055], [440, 0.05, 0.09, 'sine', 0.05]]); },
+    on() { play([[659.25, 0, 0.06, 'sine', 0.07], [880, 0.055, 0.1, 'sine', 0.07]]); },
+    off() { play([[880, 0, 0.06, 'sine', 0.06], [659.25, 0.055, 0.1, 'sine', 0.055]]); },
+    select() { play([[784, 0, 0.05, 'sine', 0.06]]); },
+    send() { play([[523.25, 0, 0.08, 'sine', 0.085], [783.99, 0.07, 0.16, 'sine', 0.085]]); },
+    like() { play([[659.25, 0, 0.07, 'sine', 0.085], [987.77, 0.06, 0.15, 'sine', 0.08], [1318.5, 0.12, 0.12, 'sine', 0.025]]); },
+    bell() { play([[1046.5, 0, 0.16, 'sine', 0.08], [1568, 0.08, 0.24, 'sine', 0.055]]); },
+    story() { play([[587.33, 0, 0.08, 'triangle', 0.065], [880, 0.07, 0.08, 'triangle', 0.065], [1174.7, 0.14, 0.15, 'triangle', 0.055]]); },
   };
-  function trigger(name) {
+  function trigger(name, arg) {
     const now = performance.now();
     if (now - last < 40) return; // anti-doublons (un seul son par appui)
     last = now;
-    try { sounds[name]?.(); } catch {}
+    try { sounds[name]?.(arg); } catch {}
   }
   return { trigger, enabled, setEnabled };
 })();
@@ -239,17 +317,24 @@ document.addEventListener('click', (e) => {
   if (!jxSound.enabled()) return;
   const t = e.target;
   if (!t || !t.closest) return;
+  if (t.closest('#chat-back, #post-back, [data-close], [aria-label="Retour"], [aria-label="Fermer"]')) return jxSound.trigger('back');
   if (t.closest('.navbtn')) {
     const n = t.closest('.navbtn').dataset.nav;
-    return jxSound.trigger(n === 'notifs' ? 'bell' : 'nav');
+    if (!n) return jxSound.trigger('tap');
+    return jxSound.trigger(n === 'notifs' ? 'bell' : 'nav', n);
   }
   if (t.closest('[data-like]')) return jxSound.trigger('like');
-  if (t.closest('#sendBtn')) return jxSound.trigger('send');
+  if (t.closest('#sendBtn')) return; // le son d'envoi est joué à la CONFIRMATION du serveur (voir flushOutbox)
   if (t.closest('[data-openstory], #story-add, #story-plus, .sv-tap, [data-act="story"]')) return jxSound.trigger('story');
-  if (t.closest('.toggle, .swatch')) return jxSound.trigger('toggle');
+  if (t.closest('.toggle')) return; // son on/off joué par l'écouteur 'change' ci-dessous
+  if (t.closest('.swatch')) return jxSound.trigger('select');
   if (t.closest('[data-nav="notifs"], [data-notif]')) return jxSound.trigger('bell');
   if (t.closest('[data-nav="settings"], [data-nav="profile"], [data-nav="editprofile"], #s-pw, .setrow')) return jxSound.trigger('open');
   if (t.closest('.tapbtn, .btn, .arow, .chip, .seg button, [data-conv], [data-profile]')) return jxSound.trigger('tap');
+}, true);
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t && t.type === 'checkbox' && t.closest && t.closest('.toggle')) jxSound.trigger(t.checked ? 'on' : 'off');
 }, true);
 
 /* ================= Overlays ================= */
@@ -326,6 +411,7 @@ document.querySelectorAll('[data-pwtoggle]').forEach((btn) => {
 });
 
 async function onLoginSuccess(data) {
+  resetSession(); // aucun résidu du compte précédent, même en changement direct de compte
   state.me = data.user;
   state.token = data.token;
   localStorage.setItem(SESSION_TOKEN_KEY, data.token);
@@ -333,6 +419,7 @@ async function onLoginSuccess(data) {
   applyTheme(data.user.settings?.theme);
   jxSound.setEnabled(data.user.settings?.sounds !== false);
   applyAccent(data.user.settings?.accentColor);
+  applyFont(data.user.settings?.messageFont || 'default');
   await boot();
 }
 
@@ -367,10 +454,17 @@ async function boot() {
   initSocket();
   await Promise.all([loadBlocked()]);
   renderMe();
+  // Suggestions visibles dès l'accueil sur desktop (une seule requête, en tâche de fond).
+  renderSiteCards();
+  api('GET', '/api/users/online').then(renderRightSugg).catch(() => {});
+  // File d'attente d'envoi : reprend les messages restés en attente (rechargement, coupure…).
+  state.outbox = outboxLoad(); flushOutbox();
+  updateInstallUi();
   show('feed');
   // Notifications push FCM : tâche de fond, ne doit jamais bloquer ni faire échouer le démarrage.
   initFirebase();
   openConversationFromNotifParam();
+  openShareRouteFromPath();
 }
 function renderMe() {
   document.querySelectorAll('[data-me-avatar]').forEach((el) => { el.outerHTML = avatarHtml(state.me, 'sm').replace('class="avatar', 'data-me-avatar class="avatar'); });
@@ -389,6 +483,7 @@ async function tryResumeSession() {
     applyTheme(me.settings?.theme);
     jxSound.setEnabled(me.settings?.sounds !== false);
     applyAccent(me.settings?.accentColor);
+    applyFont(me.settings?.messageFont || 'default');
     await boot();
   } catch {
     localStorage.removeItem(SESSION_TOKEN_KEY);
@@ -405,10 +500,13 @@ async function tryResumeSession() {
 async function setupFcm(config, swReg) {
   const messaging = firebase.messaging();
   const token = await messaging.getToken({ vapidKey: config.vapidKey, serviceWorkerRegistration: swReg });
-  if (token && token !== state.fcmToken) {
-    state.fcmToken = token;
+  // Le jeton appartient à UN compte à la fois : on le (ré)enregistre si le jeton OU le compte a changé.
+  // Avant, après un changement de compte sans rechargement, le nouveau compte ne recevait jamais de push.
+  if (token && (token !== state.fcmToken || state.fcmOwner !== state.me?.id)) {
     await api('POST', '/api/fcm/token', { token });
+    state.fcmToken = token; state.fcmOwner = state.me?.id;
   }
+  state._fcmLast = Date.now();
   if (state._fcmOnMessage) return;
   state._fcmOnMessage = true;
   messaging.onMessage((payload) => {
@@ -420,9 +518,11 @@ async function setupFcm(config, swReg) {
     if (!title && !body) return;
     swReg.showNotification(title || 'JEXCHAT', {
       body: body || 'Nouveau message',
-      icon: '/logo.png',
-      badge: '/logo.png',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       tag: data.conversationId || 'jexchat',
+      renotify: true, // sans cela, un 2e message de la même conversation remplaçait le 1er SANS son ni vibration
+      vibrate: [80, 40, 80],
       data: { conversationId: data.conversationId, url: '/messages' },
     });
   });
@@ -436,25 +536,43 @@ async function initFirebase() {
     if (!firebase.messaging.isSupported || !firebase.messaging.isSupported()) return;
     const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
     await navigator.serviceWorker.ready;
-    if (Notification.permission === 'denied') return;
-    if (Notification.permission === 'granted') { await setupFcm(config, swReg); return; }
-    // Permission pas encore demandée : les navigateurs mobiles/Safari exigent un geste de l'utilisateur.
-    const ask = async () => {
-      document.removeEventListener('click', ask, true);
-      try {
-        if (await Notification.requestPermission() === 'granted') await setupFcm(config, swReg);
-      } catch (err) { console.warn('[FCM]', err.message); }
-    };
-    document.addEventListener('click', ask, true);
+    state._fcmCtx = { config, swReg };
+    if (Notification.permission === 'granted') await setupFcm(config, swReg);
+    updatePushBanner();
   } catch (err) {
     console.warn('[FCM]', err.message);
   }
 }
-// À la déconnexion, le token de cet appareil est retiré du compte (évite les push destinés à l'ancien compte).
-async function dropFcmToken() {
-  if (!state.fcmToken) return;
-  const token = state.fcmToken; state.fcmToken = null;
-  try { await api('DELETE', '/api/fcm/token', { token }); } catch {}
+// Demande d'autorisation sur un geste EXPLICITE (bouton) : exigé par Safari/iOS et bien plus clair
+// pour l'utilisateur qu'une fenêtre surgissant au premier clic quelconque.
+async function enablePush() {
+  const ctx = state._fcmCtx;
+  if (!ctx) { toast('Notifications indisponibles sur cet appareil.'); return false; }
+  try {
+    const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    if (perm !== 'granted') {
+      toast(perm === 'denied' ? 'Notifications bloquées : autorisez-les dans les réglages du navigateur.' : 'Notifications non activées.');
+      updatePushBanner(); return false;
+    }
+    await setupFcm(ctx.config, ctx.swReg);
+    updatePushBanner(); return true;
+  } catch (e) { toast('Activation impossible : ' + e.message); return false; }
+}
+function updatePushBanner() {
+  const b = document.getElementById('pushbanner');
+  if (!b) return;
+  let dismissed = false; try { dismissed = localStorage.getItem('jx_push_dismiss') === '1'; } catch {}
+  b.classList.toggle('hidden', !(state._fcmCtx && state.me && 'Notification' in window && Notification.permission === 'default' && !dismissed));
+}
+document.getElementById('push-enable').addEventListener('click', () => enablePush());
+document.getElementById('push-dismiss').addEventListener('click', () => { try { localStorage.setItem('jx_push_dismiss', '1'); } catch {} updatePushBanner(); });
+// À la déconnexion / au changement de compte, le jeton de cet appareil est retiré de l'ancien compte.
+async function dropFcmToken(token = state.fcmToken, authToken = state.token) {
+  if (!token) return;
+  state.fcmToken = null; state.fcmOwner = null;
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['X-Session-Token'] = authToken;
+  try { await fetch('/api/fcm/token', { method: 'DELETE', headers, credentials: 'include', body: JSON.stringify({ token }), keepalive: true }); } catch {}
 }
 // Clic sur une notification système alors que JEXCHAT est déjà ouvert : le SW focus l'onglet et lui
 // poste la conversation à ouvrir.
@@ -471,6 +589,19 @@ function openConversationFromNotifParam() {
   history.replaceState(null, '', window.location.pathname);
   openConversationById(convId);
 }
+
+// Liens de partage (/lapage/pseudo et /lapage/pseudo/actu/ID) : ouvre
+// directement le profil ou la publication visée, comme l'ancienne interface.
+function openShareRouteFromPath() {
+  const m = location.pathname.match(/^\/lapage\/([^/]+)(?:\/actu\/([a-f0-9]{24}))?$/i);
+  if (!m) return;
+  history.replaceState(null, '', '/');
+  const pseudo = decodeURIComponent(m[1]);
+  if (m[2]) { openPostDetail(m[2]); return; }
+  api('GET', `/api/users/by-username/${encodeURIComponent(pseudo)}`)
+    .then((user) => { if (user?.id) { openProfile(user.id); show('profile'); } })
+    .catch(() => toast('Profil introuvable.'));
+}
 async function openConversationById(convId) {
   let conv = (state.conversations || []).find((c) => c.id === convId);
   if (!conv) {
@@ -480,14 +611,76 @@ async function openConversationById(convId) {
   if (conv) { show('messages'); openConversationObj(conv); }
 }
 
+/* ================= Connexion instable ================= */
+const jxNet = (() => {
+  let hideT = null, warnT = null, bad = false;
+  const bar = () => document.getElementById('netbar');
+  function show(text, ok, ms) {
+    const b = bar(); if (!b) return;
+    b.textContent = text; b.classList.toggle('ok', !!ok); b.classList.add('show');
+    clearTimeout(hideT); if (ms) hideT = setTimeout(() => b.classList.remove('show'), ms);
+  }
+  return {
+    offline() { clearTimeout(warnT); bad = true; show('Hors connexion — vos messages partiront dès le retour du réseau.', false); },
+    lost() { clearTimeout(warnT); warnT = setTimeout(() => { bad = true; show(navigator.onLine === false ? 'Hors connexion…' : 'Reconnexion en cours…', false); }, 2500); },
+    back() { clearTimeout(warnT); if (bad) { bad = false; show('Connexion rétablie', true, 1800); } },
+  };
+})();
+window.addEventListener('offline', () => jxNet.offline());
+window.addEventListener('online', () => { jxNet.back(); if (state.socket && !state.socket.connected) state.socket.connect(); flushOutbox(); });
+if (navigator.onLine === false) jxNet.offline();
+
+/* ================= Installation de l'application (PWA) ================= */
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+function updateInstallUi() {
+  const show = !isStandalone();
+  ['btn-install', 'nav-install'].forEach((id) => document.getElementById(id)?.classList.toggle('hidden', !show));
+}
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); state._installEvt = e; updateInstallUi(); });
+window.addEventListener('appinstalled', () => { state._installEvt = null; updateInstallUi(); toast('Jexchat est installée.'); });
+function installSteps() {
+  const ua = navigator.userAgent || '';
+  const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /Android/i.test(ua);
+  if (ios) return ['Touchez le bouton <b>Partager</b> (carré avec une flèche) de Safari.', 'Choisissez <b>Sur l\'écran d\'accueil</b>.', 'Touchez <b>Ajouter</b>. Sur iPhone, les notifications ne marchent que depuis l\'application installée.'];
+  if (android) return ['Ouvrez le menu <b>⋮</b> de votre navigateur.', 'Touchez <b>Installer l\'application</b> (ou <b>Ajouter à l\'écran d\'accueil</b>).', 'Confirmez : Jexchat apparaît parmi vos applications.'];
+  if (/Firefox/i.test(ua)) return ['Firefox ne permet pas d\'installer l\'application sur ordinateur.', 'Ouvrez Jexchat dans <b>Chrome</b> ou <b>Edge</b> pour l\'installer, ou ajoutez la page à vos favoris.'];
+  return ['Cliquez sur l\'icône <b>Installer</b> à droite de la barre d\'adresse (ou menu <b>⋮</b> › <b>Installer Jexchat</b>).', 'Confirmez : Jexchat s\'ouvre dans sa propre fenêtre, comme une application.'];
+}
+function openInstall() {
+  const ev = state._installEvt;
+  if (ev) {
+    state._installEvt = null; // l'invite ne peut servir qu'une fois
+    ev.prompt();
+    ev.userChoice.then((r) => { if (r.outcome !== 'accepted') updateInstallUi(); }).catch(() => {});
+    return;
+  }
+  document.getElementById('install-steps').innerHTML = installSteps().map((s, i) => `<div class="st"><span class="n">${i + 1}</span><span>${s}</span></div>`).join('');
+  openOverlay('installsheet');
+}
+document.getElementById('btn-install').addEventListener('click', openInstall);
+document.getElementById('nav-install').addEventListener('click', openInstall);
+updateInstallUi();
+
 /* ================= Socket.IO ================= */
 function initSocket() {
   if (typeof io === 'undefined') return;
   if (state.socket?.connected) return;
-  const socket = io({ auth: { token: state.token }, transports: ['websocket', 'polling'] });
+  const socket = io({ auth: { token: state.token }, transports: ['websocket', 'polling'], reconnectionDelayMax: 5000 });
   state.socket = socket;
 
   socket.on('connect_error', (err) => console.warn('[Socket]', err.message));
+  // Connexion instable : au retour du réseau on rejoint de nouveau la discussion ouverte (les salles sont
+  // perdues à la coupure), on récupère ce qui a été manqué et on renvoie les messages en attente.
+  socket.on('connect', () => {
+    jxNet.back();
+    const chatOpen = state.currentConvId && document.getElementById('chat').classList.contains('active');
+    if (chatOpen && !document.hidden) { socket.emit('join_conversation', state.currentConvId); loadMessages(state.currentConvId, true); }
+    if (document.getElementById('messages').classList.contains('active')) loadConversations();
+    refreshNotifCount();
+    flushOutbox();
+  });
+  socket.on('disconnect', () => jxNet.lost());
 
   socket.on('new_message', (msg) => handleIncomingMessage(msg));
   socket.on('message_edited', (msg) => updateMessageInThread(msg));
@@ -522,9 +715,18 @@ function initSocket() {
     if (c) c.background = background;
     if (state.currentConvId === conversationId) applyChatBackground(background);
   });
-  socket.on('notification', () => { state.notifCount++; renderNotifBadge(); });
+  socket.on('notification', () => {
+    state.notifCount++; renderNotifBadge();
+    if (document.getElementById('notifs').classList.contains('active')) reloadNotifsSoon();
+  });
   socket.on('notifications_read', () => refreshNotifCount());
-  socket.on('notifications_deleted', () => refreshNotifCount());
+  // Suppression faite ailleurs (autre appareil) : la liste affichée suit, plus de notification « fantôme ».
+  socket.on('notifications_deleted', (d) => {
+    const list = document.getElementById('notifList');
+    if (d && d.all) { state._notifSeen.clear(); if (list) list.innerHTML = '<div class="empty">Aucune notification.</div>'; }
+    else (d?.ids || []).forEach((id) => { state._notifSeen.delete(id); list?.querySelector(`.notif[data-notif="${id}"]`)?.remove(); });
+    refreshNotifCount();
+  });
   socket.on('post_created', (post) => { state.postCache.set(post.id, post); if (document.getElementById('feed').classList.contains('active')) prependPost(post); });
   socket.on('post_liked', ({ postId, likesCount }) => {
     document.querySelectorAll(`[data-postid="${postId}"] .plikes`).forEach((el) => { el.textContent = `${likesCount} mention${likesCount === 1 ? '' : 's'} J'aime`; });
@@ -554,7 +756,7 @@ setInterval(() => { if (state.me) refreshNotifCount(); }, 25000);
 
 /* ================= FEED ================= */
 async function loadFeed(reset) {
-  if (reset) { state.feed = { skip: 0, hasMore: true, loading: false }; document.getElementById('feedList').innerHTML = ''; }
+  if (reset) { state.feed = { skip: 0, hasMore: true, loading: false }; state._feedIds = new Set(); document.getElementById('feedList').innerHTML = ''; }
   if (state.feed.loading || !state.feed.hasMore) return;
   state.feed.loading = true;
   try {
@@ -564,7 +766,9 @@ async function loadFeed(reset) {
     state.feed.hasMore = posts.length === 10;
     const list = document.getElementById('feedList');
     if (!posts.length && reset) list.innerHTML = '<div class="empty">Aucune publication pour le moment. Soyez le premier à publier !</div>';
-    posts.forEach((p) => list.appendChild(renderPostEl(p)));
+    // Dédoublonnage par identifiant : jamais deux fois le même post à l'écran.
+    state._feedIds = state._feedIds || new Set();
+    posts.forEach((p) => { if (!state._feedIds.has(p.id)) { state._feedIds.add(p.id); list.appendChild(renderPostEl(p)); } });
     document.getElementById('feedMore').classList.toggle('hidden', !state.feed.hasMore);
     state._feedLoaded = true;
   } catch (e) { toast(e.message); } finally { state.feed.loading = false; }
@@ -573,6 +777,9 @@ async function loadFeed(reset) {
 document.getElementById('feedMore').addEventListener('click', () => loadFeed(false));
 function prependPost(post) {
   const list = document.getElementById('feedList');
+  state._feedIds = state._feedIds || new Set();
+  if (state._feedIds.has(post.id)) return;
+  state._feedIds.add(post.id);
   list.insertBefore(renderPostEl(post), list.firstChild);
 }
 
@@ -605,6 +812,7 @@ function renderPostEl(p) {
     ${mediaHtml}
     ${sharedHtml}
     ${!p.sharedFrom && p.content ? `<div class="pcontent">${linkify(escText(p.content))}</div>` : (p.sharedFrom && p.content ? `<div class="pcontent">${linkify(escText(p.content))}</div>` : '')}
+    ${p.description ? `<div class="pcontent" style="color:var(--sub);font-size:13px;margin-top:4px">${linkify(escText(p.description))}</div>` : ''}
     <div class="pactions"><div class="left">
       <button class="tapbtn ${p.likedByMe ? 'liked' : ''}" aria-label="J'aime" data-like="${p.id}">${icon('heart')}</button>
       <button class="tapbtn" aria-label="Partager" data-share="${p.id}">${icon('share')}</button>
@@ -754,7 +962,7 @@ document.getElementById('sheetBody').addEventListener('click', async (e) => {
   try {
     if (btn.dataset.act === 'delete-post') { await api('DELETE', `/api/posts/${id}`); document.querySelector(`[data-postid="${id}"]`)?.remove(); toast('Publication supprimée'); }
     if (btn.dataset.act === 'copy-link') { await shareOrCopy(`${location.origin}/lapage/${state.postCache.get(id)?.author?.username || ''}/actu/${id}`, 'Publication Jexchat'); }
-    if (btn.dataset.act === 'report-post') { await api('POST', '/api/reports', { targetType: 'message', targetId: id, reason: 'Contenu signalé depuis le fil' }); toast('Signalement envoyé'); }
+    if (btn.dataset.act === 'report-post') { await api('POST', '/api/reports', { targetType: 'post', targetId: id, reason: 'Contenu signalé depuis le fil' }); toast('Signalement envoyé'); }
     if (btn.dataset.act === 'delete-msg') { await deleteMessageAction(id); }
     if (btn.dataset.act === 'edit-msg') { startEditMessage(id); }
     if (btn.dataset.act === 'pin-msg') { await togglePinMessage(id); }
@@ -1516,9 +1724,32 @@ async function loadExplore() {
     const grid = document.getElementById('exploreGrid');
     grid.innerHTML = '';
     posts.forEach((p) => grid.appendChild(renderTile(p)));
-    document.getElementById('rightSugg').innerHTML = online.filter((u) => u.id !== state.me.id).slice(0, 5).map((u) => `
-      <div class="rsugg">${avatarHtml(u)}<div class="info"><b>${escText(u.username)}</b><small>En ligne</small></div><button data-msguser="${u.id}">Message</button></div>`).join('');
+    renderRightSugg(online);
   } catch (e) { toast(e.message); }
+}
+function renderRightSugg(online) {
+  const el = document.getElementById('rightSugg');
+  if (!el) return;
+  const list = online.filter((u) => u.id !== state.me.id).slice(0, 5);
+  el.innerHTML = list.map((u) => `
+      <div class="rsugg">${avatarHtml(u)}<div class="info"><b>${escText(u.username)}</b><small>En ligne</small></div><button data-msguser="${u.id}">Message</button></div>`).join('');
+  document.getElementById('rightOnlineTitle')?.classList.toggle('hidden', !list.length);
+}
+// Sites gratuits recommandés (panneau « Suggestions pour vous », desktop). Pour en ajouter : une ligne ici.
+const JX_SITES = [
+  { name: 'FastDL', domain: 'fastdl.app', desc: 'Télécharger des photos et vidéos Instagram', c: ['#f58529', '#dd2a7b'] },
+  { name: 'FDown', domain: 'fdown.net', desc: 'Télécharger des vidéos Facebook', c: ['#1877f2', '#0b4fb3'] },
+  { name: 'Gratos', domain: 'gratos.app', desc: 'Un site gratuit à découvrir', c: ['#12b886', '#0b7285'] },
+  { name: 'Onread', domain: 'onread.com', desc: 'Un site gratuit à découvrir', c: ['#7950f2', '#4c2fb8'] },
+  { name: 'Discover Profile', domain: 'discoverprofile.com', desc: 'Un site gratuit à découvrir', c: ['#fa5252', '#c2255c'] },
+];
+function renderSiteCards() {
+  const el = document.getElementById('rightSites');
+  if (!el || el.dataset.done) return;
+  el.dataset.done = '1';
+  el.innerHTML = JX_SITES.map((s) => `<a class="sitecard" href="https://${s.domain}" target="_blank" rel="noopener noreferrer nofollow">
+    <span class="logo" style="background:linear-gradient(135deg,${s.c[0]},${s.c[1]})">${escText(s.name[0])}<img src="https://${s.domain}/favicon.ico" alt="" width="44" height="44" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>
+    <span class="meta"><b>${escText(s.name)}</b><small>${escText(s.desc)}</small><span class="dom">${escText(s.domain)}</span></span><span class="go" aria-hidden="true">↗</span></a>`).join('');
 }
 function renderTile(p) {
   const btn = document.createElement('button');
@@ -1545,19 +1776,41 @@ async function startPrivateChat(userId) {
 }
 
 const searchInput = document.getElementById('searchInput');
+let searchSeq = 0;
+function highlightText(text, q) {
+  const esc = escText(text);
+  const qe = escText(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return qe ? esc.replace(new RegExp(qe, 'gi'), (m) => `<mark>${m}</mark>`) : esc;
+}
+function postResultHtml(p, q) {
+  const text = (p.content || p.description || '').slice(0, 160) || '(sans texte)';
+  const thumb = p.mediaType === 'image' && /^https:\/\//i.test(p.mediaUrl || '')
+    ? `<img src="${escText(p.mediaUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+    : icon(p.mediaType === 'video' ? 'video' : p.mediaType === 'link' ? 'link' : 'msg', 20);
+  return `<button type="button" class="presult" data-openpostres="${p.id}"><div class="thumb">${thumb}</div><div class="txt"><b>${escText(p.author?.username || '')}</b><span>${highlightText(text, q)}</span></div></button>`;
+}
+document.addEventListener('click', (e) => { const r = e.target.closest('[data-openpostres]'); if (r) openPostDetail(r.dataset.openpostres); });
 searchInput.addEventListener('input', debounce(async (e) => {
   const q = e.target.value.trim();
   const results = document.getElementById('searchResults');
+  const seq = ++searchSeq;
   if (!q) { results.innerHTML = ''; document.getElementById('suggLabel').classList.remove('hidden'); document.getElementById('suggRow').classList.remove('hidden'); return; }
   document.getElementById('suggLabel').classList.add('hidden');
   document.getElementById('suggRow').classList.add('hidden');
   try {
-    const users = await api('GET', `/api/users/search?q=${encodeURIComponent(q)}`);
-    results.innerHTML = users.length ? `<div class="searchgrid">${users.map((u) => `
+    const [users, posts] = await Promise.all([
+      api('GET', `/api/users/search?q=${encodeURIComponent(q)}`),
+      q.length >= 2 ? api('GET', `/api/posts/search?q=${encodeURIComponent(q)}&limit=15`).catch(() => []) : Promise.resolve([]),
+    ]);
+    if (seq !== searchSeq) return; // une saisie plus récente a déjà remplacé celle-ci
+    let html = '';
+    if (users.length) html += `<div class="section-label" style="padding-top:0">Comptes</div><div class="searchgrid">${users.map((u) => `
       <div class="sresult" data-openprofile3="${u.id}">
         ${avatarHtml(u)}<b>${escText(u.username)}</b><button data-msguser="${u.id}">Message</button>
-      </div>`).join('')}</div>` : '<div class="empty">Aucun résultat</div>';
-  } catch (e) { toast(e.message); }
+      </div>`).join('')}</div>`;
+    if (posts.length) html += `<div class="section-label">Publications</div>${posts.map((p) => postResultHtml(p, q)).join('')}`;
+    results.innerHTML = html || '<div class="empty">Aucun résultat</div>';
+  } catch (err) { if (seq === searchSeq) toast(err.message); }
 }, 300));
 
 /* ================= MESSAGES LIST ================= */
@@ -1644,6 +1897,7 @@ async function openConversationObj(conv) {
   show('chat');
   state.socket?.emit('join_conversation', conv.id);
   await loadMessages(conv.id, true);
+  renderPending(conv.id);
   try { await api('POST', `/api/conversations/${conv.id}/seen`); } catch {}
   const rowEl = document.querySelector(`[data-conv="${conv.id}"] .unreadn`);
   if (rowEl) rowEl.remove();
@@ -1771,7 +2025,12 @@ function buildMessageEl(m) {
   const reacts = (m.reactions || []).length ? `<div class="reacts">${Object.entries(countReactions(m.reactions)).map(([t, n]) => `<span>${reactionEmoji(t)} ${n}</span>`).join('')}</div>` : '';
   const seen = isOut ? (m.seenBy && m.seenBy.length > 1 ? ' ✓✓' : ' ✓') : '';
   const pinBadge = m.pinned ? '<div class="pin">📌 épinglé</div>' : '';
-  el.innerHTML = `${pinBadge}${body}${reacts}<time>${escText(formatTime(m.createdAt))}${m.editedAt ? ' · modifié' : ''}${seen}</time>`;
+  // Dans un groupe, chaque bulle entrante montre qui a envoyé le message
+  // (nom coloré par l'identité de l'expéditeur, comme WhatsApp/Telegram).
+  const isGroupConv = state.conversations.find((x) => x.id === m.conversationId)?.type === 'group';
+  const senderName = isGroupConv && !isOut && m.sender?.username ? escText(m.sender.username) : '';
+  const senderHtml = senderName ? `<div class="sender" style="font-size:11.5px;font-weight:700;color:${/^#[0-9a-f]{3,8}$/i.test(m.sender.identity?.colorA || '') ? m.sender.identity.colorA : 'var(--blue2)'};margin-bottom:2px">${senderName}</div>` : '';
+  el.innerHTML = `${pinBadge}${senderHtml}${body}${reacts}<time>${escText(formatTime(m.createdAt))}${m.editedAt ? ' · modifié' : ''}${seen}</time>`;
   if (!m.deleted) {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); openMsgMenu(m, isOut); });
     let pressTimer;
@@ -1833,19 +2092,42 @@ async function togglePinMessage(msgId) {
 
 function handleIncomingMessage(msg) {
   if (!state.messages[msg.conversationId]) state.messages[msg.conversationId] = [];
+  // Même message reçu deux fois (événement socket + réponse HTTP, ou reconnexion) : traité une seule fois.
+  if (state.messages[msg.conversationId].some((m) => m.id === msg.id)) return;
   state.messages[msg.conversationId].push(msg);
+  const mine = msg.senderId === state.me.id || msg.sender?.id === state.me.id;
   if (msg.conversationId === state.currentConvId) {
     const thread = document.getElementById('thread');
     if (!msg.expired) { thread.appendChild(buildMessageEl(msg)); thread.scrollTop = thread.scrollHeight; }
-    api('POST', `/api/conversations/${msg.conversationId}/seen`).catch(() => {});
+    // Accusé de lecture seulement si l'onglet est réellement visible ;
+    // sinon il est envoyé au retour sur l'onglet (visibilitychange ci-dessous).
+    if (!document.hidden) api('POST', `/api/conversations/${msg.conversationId}/seen`).catch(() => {});
   } else {
     const c = state.conversations.find((x) => x.id === msg.conversationId);
-    if (c) c.unreadCount = (c.unreadCount || 0) + 1;
+    if (c && !mine) c.unreadCount = (c.unreadCount || 0) + 1;
   }
   const c = state.conversations.find((x) => x.id === msg.conversationId);
   if (c) { c.lastMessage = { content: msg.content, senderId: msg.senderId, type: msg.type, createdAt: msg.createdAt }; state.conversations = [c, ...state.conversations.filter((x) => x.id !== c.id)]; }
   if (document.getElementById('messages').classList.contains('active')) renderConvList();
 }
+
+// Onglet masqué/réduit : on quitte la salle de la discussion (le serveur peut alors envoyer notification
+// et push) ; au retour on la rejoint, on marque lu et on récupère ce qui a pu être manqué.
+document.addEventListener('visibilitychange', () => {
+  const chatOpen = state.currentConvId && document.getElementById('chat').classList.contains('active');
+  if (document.hidden) { if (chatOpen) state.socket?.emit('leave_conversation', state.currentConvId); return; }
+  if (chatOpen) {
+    state.socket?.emit('join_conversation', state.currentConvId);
+    api('POST', `/api/conversations/${state.currentConvId}/seen`).catch(() => {});
+  }
+  if (state.me) {
+    flushOutbox();
+    // Jeton push renouvelé régulièrement (il peut changer côté navigateur) : au plus une fois / 30 min.
+    if (state._fcmCtx && 'Notification' in window && Notification.permission === 'granted' && Date.now() - (state._fcmLast || 0) > 30 * 60 * 1000) {
+      setupFcm(state._fcmCtx.config, state._fcmCtx.swReg).catch(() => {});
+    }
+  }
+});
 function updateMessageInThread(msg) {
   const arr = state.messages[msg.conversationId] || [];
   const idx = arr.findIndex((x) => x.id === msg.id);
@@ -1870,6 +2152,60 @@ function refreshPresence(userId, online, lastSeen) {
 }
 
 /* Sending */
+/* ================= File d'attente d'envoi (connexion instable) ================= */
+const outboxKey = () => `jx_outbox_${state.me?.id || 'x'}`;
+function outboxLoad() { try { return JSON.parse(localStorage.getItem(outboxKey()) || '[]').filter((x) => x && x.cid && x.convId && x.content); } catch { return []; } }
+function outboxSave() { try { localStorage.setItem(outboxKey(), JSON.stringify(state.outbox.slice(-30))); } catch {} }
+function newClientId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+function pendingEl(item) {
+  const el = document.createElement('div');
+  el.className = `bubble out ${item.failed ? 'failed' : 'pending'}`;
+  el.dataset.cid = item.cid;
+  el.innerHTML = `${linkify(escText(item.content))}<time>${item.failed ? 'Non envoyé' : '⏳ En attente'}</time>` +
+    (item.failed ? `<div class="retry"><button type="button" data-retry="${item.cid}">Réessayer</button><button type="button" data-discard="${item.cid}">Supprimer</button></div>` : '');
+  return el;
+}
+function renderPending(convId) {
+  const thread = document.getElementById('thread');
+  state.outbox.filter((x) => x.convId === convId).forEach((x) => thread.appendChild(pendingEl(x)));
+  thread.scrollTop = thread.scrollHeight;
+}
+let outboxBusy = false, outboxTimer = null, outboxDelay = 3000;
+async function flushOutbox() {
+  if (outboxBusy || !state.me) return;
+  outboxBusy = true;
+  let retry = false;
+  try {
+    for (const item of [...state.outbox]) {
+      if (item.failed) continue;
+      try {
+        const msg = await api('POST', `/api/conversations/${item.convId}/messages`, { content: item.content, type: 'text', replyTo: item.replyTo, clientId: item.cid });
+        state.outbox = state.outbox.filter((x) => x.cid !== item.cid); outboxSave();
+        document.querySelector(`#thread [data-cid="${item.cid}"]`)?.remove();
+        handleIncomingMessage(msg); // dédoublonné : l'événement socket du même message est ignoré
+        jxSound.trigger('send');    // son d'envoi = CONFIRMATION réelle du serveur
+        outboxDelay = 3000;
+      } catch (e) {
+        if (e.network || !e.status || e.status >= 500 || e.status === 429) { retry = true; break; } // réseau/serveur : on réessaiera
+        item.failed = true; outboxSave();
+        const el = document.querySelector(`#thread [data-cid="${item.cid}"]`);
+        if (el) el.replaceWith(pendingEl(item));
+        toast(e.message);
+      }
+    }
+  } finally { outboxBusy = false; }
+  if (retry) { clearTimeout(outboxTimer); outboxTimer = setTimeout(flushOutbox, outboxDelay); outboxDelay = Math.min(outboxDelay * 2, 20000); }
+}
+document.getElementById('thread').addEventListener('click', (e) => {
+  const r = e.target.closest('[data-retry]'), d = e.target.closest('[data-discard]');
+  if (r) {
+    const it = state.outbox.find((x) => x.cid === r.dataset.retry);
+    if (it) { it.failed = false; outboxSave(); r.closest('.bubble')?.replaceWith(pendingEl(it)); flushOutbox(); }
+  } else if (d) {
+    state.outbox = state.outbox.filter((x) => x.cid !== d.dataset.discard); outboxSave();
+    d.closest('.bubble')?.remove();
+  }
+});
 const msgInput = document.getElementById('msgInput');
 let typingTimer = null;
 msgInput.addEventListener('input', () => {
@@ -1884,13 +2220,25 @@ async function sendMessage() {
   const val = msgInput.value.trim();
   if (!val || !state.currentConvId) return;
   const editing = msgInput.dataset.editing;
-  msgInput.value = ''; msgInput.dataset.editing = '';
-  try {
-    if (editing) { await api('PUT', `/api/messages/${editing}`, { content: val }); }
-    else { await api('POST', `/api/conversations/${state.currentConvId}/messages`, { content: val, type: 'text', replyTo: state.replyTo }); }
-    state.replyTo = null; document.getElementById('replybar').classList.add('hidden');
-  } catch (e) { toast(e.message); }
-  state.socket?.emit('typing_stop', { conversationId: state.currentConvId });
+  if (editing) {
+    // Modification : le champ n'est vidé qu'APRÈS confirmation du serveur.
+    try {
+      await api('PUT', `/api/messages/${editing}`, { content: val });
+      msgInput.value = ''; msgInput.dataset.editing = '';
+      state.replyTo = null; document.getElementById('replybar').classList.add('hidden');
+    } catch (e) { toast(e.message + ' — votre texte est conservé.'); }
+    state.socket?.emit('typing_stop', { conversationId: state.currentConvId });
+    return;
+  }
+  // Nouveau message : mis en file d'attente AVANT l'envoi (visible tout de suite, « En attente »), puis
+  // envoyé avec une clé unique. Coupure réseau → il reste en attente et repart seul, sans doublon.
+  const item = { cid: newClientId(), convId: state.currentConvId, content: val, replyTo: state.replyTo || null, failed: false };
+  state.outbox.push(item); outboxSave();
+  msgInput.value = ''; state.replyTo = null; document.getElementById('replybar').classList.add('hidden');
+  const thread = document.getElementById('thread');
+  thread.appendChild(pendingEl(item)); thread.scrollTop = thread.scrollHeight;
+  state.socket?.emit('typing_stop', { conversationId: item.convId });
+  flushOutbox();
 }
 function renderTyping() {
   const names = Object.values(state.typing);
@@ -2048,7 +2396,8 @@ function openGroupModal(existing) {
 /* ================= NOTIFICATIONS ================= */
 async function loadNotifications() {
   try {
-    const notifs = await api('GET', '/api/notifications');
+    // Les ids en cours de suppression côté serveur ne sont jamais réaffichés (course sortie/retour rapide).
+    const notifs = (await api('GET', '/api/notifications')).filter((n) => !state._notifConsuming.has(n.id));
     const list = document.getElementById('notifList');
     if (!notifs.length) { list.innerHTML = '<div class="empty">Aucune notification.</div>'; return; }
     notifs.forEach((n) => state._notifSeen.add(n.id));
@@ -2063,15 +2412,25 @@ async function loadNotifications() {
 }
 // Notifications affichées pendant la visite de la page (supprimées à la sortie).
 state._notifSeen = new Set();
+state._notifConsuming = new Set();
+const reloadNotifsSoon = debounce(() => { if (document.getElementById('notifs').classList.contains('active')) loadNotifications(); }, 700);
 function flushNotifications(opts) {
   const ids = [...state._notifSeen];
   if (!ids.length) return;
-  state._notifSeen.clear();
+  const unload = !!(opts && opts.unload);
+  // Les ids ne sont retirés qu'en usage normal ; si l'envoi échoue (réseau, 5xx) ils sont REMIS dans la
+  // file et re-consommés à la prochaine sortie de la page → rien ne revient ni ne reste coincé.
+  if (!unload) { ids.forEach((id) => { state._notifSeen.delete(id); state._notifConsuming.add(id); }); }
+  const done = (ok) => {
+    ids.forEach((id) => state._notifConsuming.delete(id));
+    if (!ok && !unload) ids.forEach((id) => state._notifSeen.add(id));
+    if (ok && !unload) refreshNotifCount();
+  };
   const headers = { 'Content-Type': 'application/json' };
   if (state.token) headers['X-Session-Token'] = state.token;
   fetch('/api/notifications/consume', { method: 'POST', headers, credentials: 'include', body: JSON.stringify({ ids }), keepalive: true })
-    .then(() => { if (!opts || !opts.unload) refreshNotifCount(); })
-    .catch(() => {});
+    .then((res) => done(res.ok))
+    .catch(() => done(false));
 }
 // Fermeture de l'onglet / de l'application alors que la page Notifications est ouverte.
 window.addEventListener('pagehide', () => {
@@ -2148,8 +2507,9 @@ async function openProfile(userId) {
       <div class="row"><span>Vu pour la dernière fois</span><span>${escText(formatLastSeen(user.lastSeen))}</span></div>`;
     const posts = await api('GET', `/api/posts/user/${userId}`);
     if (reqId !== state._profileReqId) return;
-    document.getElementById('p-count').textContent = posts.length;
-    document.getElementById('p-likes').textContent = posts.reduce((sum, p) => sum + (p.likesCount || 0), 0);
+    // Totaux réels fournis par le serveur (et non ceux de la seule première page chargée).
+    document.getElementById('p-count').textContent = user.stats ? user.stats.posts : posts.length;
+    document.getElementById('p-likes').textContent = user.stats ? user.stats.likes : posts.reduce((sum, p) => sum + (p.likesCount || 0), 0);
     const grid = document.getElementById('profileGrid');
     grid.innerHTML = '';
     posts.forEach((p) => { state.postCache.set(p.id, p); grid.appendChild(renderTile(p)); });
@@ -2237,7 +2597,10 @@ function initSettingsScreen() {
   document.getElementById('s-sounds').checked = state.me.settings?.sounds !== false;
   document.getElementById('s-online').checked = state.me.settings?.privacy?.showOnlineStatus !== false;
   document.getElementById('s-seen').checked = state.me.settings?.privacy?.showLastSeen !== false;
-  document.getElementById('s-font').value = state.me.settings?.messageFont || 'default';
+  const fsel = document.getElementById('s-font');
+  if (!fsel.options.length) fsel.innerHTML = Object.entries(JX_FONTS).map(([k, f]) => `<option value="${k}">${escText(f.label)}</option>`).join('');
+  fsel.value = JX_FONTS[state.me.settings?.messageFont] ? state.me.settings.messageFont : 'default';
+  document.getElementById('s-font-preview').style.fontFamily = JX_FONTS[fsel.value].css;
   const isMod = state.me.roles?.some((r) => ['ADMIN', 'MODERATOR', 'OWNER'].includes(r));
   document.getElementById('s-admin').style.display = isMod ? 'flex' : 'none';
   document.getElementById('s-adminlabel').style.display = isMod ? 'block' : 'none';
@@ -2249,11 +2612,11 @@ document.getElementById('s-dark').addEventListener('change', async (e) => {
   try { await api('PUT', '/api/settings', { theme: e.target.checked ? 'dark' : 'light' }); state.me.settings.theme = e.target.checked ? 'dark' : 'light'; } catch {}
 });
 document.getElementById('s-notif').addEventListener('change', async (e) => {
+  if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') enablePush();
   try { await api('PUT', '/api/settings', { notifications: e.target.checked }); toast(e.target.checked ? 'Notifications activées' : 'Notifications désactivées'); } catch (err) { toast(err.message); }
 });
 document.getElementById('s-sounds').addEventListener('change', async (e) => {
   jxSound.setEnabled(e.target.checked);
-  if (e.target.checked) jxSound.trigger('toggle');
   try { await api('PUT', '/api/settings', { sounds: e.target.checked }); state.me.settings.sounds = e.target.checked; toast(e.target.checked ? 'Sons activés' : 'Sons désactivés'); } catch (err) { toast(err.message); }
 });
 document.getElementById('s-online').addEventListener('change', async (e) => {
@@ -2263,7 +2626,10 @@ document.getElementById('s-seen').addEventListener('change', async (e) => {
   try { await api('PUT', '/api/settings', { privacy: { showLastSeen: e.target.checked } }); } catch (err) { toast(err.message); }
 });
 document.getElementById('s-font').addEventListener('change', async (e) => {
-  try { await api('PUT', '/api/settings', { messageFont: e.target.value }); } catch (err) { toast(err.message); }
+  const key = e.target.value;
+  applyFont(key); // effet immédiat, sans attendre le serveur
+  document.getElementById('s-font-preview').style.fontFamily = (JX_FONTS[key] || JX_FONTS.default).css;
+  try { await api('PUT', '/api/settings', { messageFont: key }); if (state.me?.settings) state.me.settings.messageFont = key; } catch (err) { toast(err.message); }
 });
 document.getElementById('s-swatches').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-accent]'); if (!b) return;
@@ -2316,8 +2682,7 @@ document.getElementById('s-logout').addEventListener('click', async () => {
   await dropFcmToken();
   try { await api('POST', '/api/auth/logout'); } catch {}
   localStorage.removeItem(SESSION_TOKEN_KEY);
-  state.me = null; state.token = null;
-  state.socket?.disconnect();
+  resetSession();
   renderAccounts();
   show(getSavedAccounts().length ? 'accounts' : 'auth');
 });
@@ -2333,11 +2698,42 @@ document.getElementById('del-confirm').addEventListener('click', async () => {
     localStorage.removeItem(SESSION_TOKEN_KEY);
     removeSavedAccount(state.me.id);
     toast('Compte supprimé');
-    state.me = null; state.token = null;
-    state.socket?.disconnect();
+    resetSession();
     show('auth');
   } catch (e) { err.textContent = e.message; }
 });
+
+/* Remise à zéro complète de l'état propre au compte : appelée à la déconnexion,
+   à la suppression de compte ET à chaque connexion, pour qu'aucune donnée du
+   compte précédent (messages, caches, compteurs) ne subsiste sur un appareil
+   partagé. */
+function resetSession() {
+  // Le jeton push de cet appareil quitte l'ancien compte (changement de compte direct).
+  if (state.fcmToken && state.token) dropFcmToken(state.fcmToken, state.token);
+  clearTimeout(outboxTimer); state.outbox = [];
+  state.me = null; state.token = null;
+  state.conversations = [];
+  state.currentConvId = null;
+  state.messages = {};
+  state.hasMoreMessages = true;
+  state.onlineUsers = new Set();
+  state.typing = {};
+  state.notifCount = 0;
+  state.replyTo = null;
+  state.feed = { skip: 0, hasMore: true, loading: false };
+  state.postCache = new Map();
+  state.userCache = new Map();
+  state.blocked = new Set();
+  state._feedIds = new Set();
+  state._storyGroups = null;
+  state._notifSeen = new Set();
+  state._profileTarget = null;
+  state._exploreLoaded = false;
+  state._feedLoaded = false;
+  state.socket?.disconnect();
+  state.socket = null;
+  renderNotifBadge();
+}
 
 /* ================= Init ================= */
 paintIcons();

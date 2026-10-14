@@ -142,11 +142,15 @@ const messageSchema = new mongoose.Schema({
   pinned: { type: Boolean, default: false },
   editedAt: { type: Date, default: null },
   seenBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  // Clé d'idempotence fournie par le client : un renvoi après coupure réseau
+  // ne crée jamais un second message.
+  clientId: { type: String, default: undefined },
   deleted: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true },
 });
 
+messageSchema.index({ senderId: 1, clientId: 1 }, { unique: true, partialFilterExpression: { clientId: { $type: 'string' } } });
 messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1 });
 messageSchema.index({ expiresAt: 1 });
@@ -171,7 +175,7 @@ notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
 // --- Report ---
 const reportSchema = new mongoose.Schema({
   reporterId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  targetType: { type: String, enum: ['user', 'message', 'conversation'], required: true },
+  targetType: { type: String, enum: ['user', 'message', 'conversation', 'post'], required: true },
   targetId: { type: mongoose.Schema.Types.ObjectId, required: true },
   reason: { type: String, maxlength: 500 },
   status: { type: String, enum: ['pending', 'reviewed', 'resolved', 'dismissed'], default: 'pending' },
@@ -315,6 +319,9 @@ async function unblockUser(userId, targetId) {
 }
 
 async function addFcmToken(userId, token) {
+  // Un jeton = un appareil = UN compte à la fois : on le retire des autres comptes pour que les
+  // notifications d'un ancien compte (même appareil) n'arrivent plus au mauvais endroit.
+  await User.updateMany({ _id: { $ne: userId }, fcmTokens: token }, { $pull: { fcmTokens: token } });
   return User.updateOne({ _id: userId }, { $addToSet: { fcmTokens: token } });
 }
 
@@ -408,12 +415,16 @@ async function searchUsers(query, limit = 20, skip = 0) {
     .lean();
 }
 
+async function getMessageByClientId(senderId, clientId) {
+  return Message.findOne({ senderId, clientId }).lean();
+}
+
 async function getOnlineUsers(limit = 30) {
   // On se base sur le flag isOnline (maintenu en temps réel par Socket.IO à la
   // connexion/déconnexion), pas sur un simple délai depuis lastSeen : un délai
   // faisait apparaître un utilisateur comme "en ligne" jusqu'à 2 minutes après
   // sa déconnexion réelle, en désaccord avec les événements user_online/user_offline.
-  return User.find({ isOnline: true, isBanned: { $ne: true } })
+  return User.find({ isOnline: true, isBanned: { $ne: true }, 'settings.privacy.showOnlineStatus': { $ne: false } })
     .select('username identity isOnline lastSeen')
     .sort({ lastSeen: -1 })
     .limit(limit)
@@ -663,11 +674,13 @@ async function getPinnedMessages(conversationId) {
     .lean();
 }
 
-// Expired message cleanup
+// Expiration à 5 jours : alignée sur la promesse affichée à l'inscription.
+// On vide le texte ET l'URL, on retire les réactions et la référence au
+// partage : ne subsiste que le squelette (expéditeur, date, type « expired »).
 async function cleanupExpiredMessages() {
   const result = await Message.updateMany(
-    { expiresAt: { $lt: new Date() }, deleted: { $ne: true } },
-    { $set: { content: '', type: 'expired', deleted: false } }
+    { expiresAt: { $lt: new Date() }, type: { $ne: 'expired' } },
+    { $set: { content: '', url: '', sharedPostId: null, type: 'expired', reactions: [] } }
   );
   return result.modifiedCount;
 }
@@ -752,25 +765,14 @@ async function createPost(data) {
   return p.toObject();
 }
 
+// Pagination stable : ordre fixé par (createdAt décroissant, _id décroissant),
+// donc charger la page suivante ne déplace jamais un contenu déjà affiché.
 async function getPosts(skip = 0, limit = 20) {
-  // Petit "algorithme" de flux : on mélange l'ordre à l'intérieur de blocs de
-  // publications récentes à chaque appel, pour éviter d'afficher toujours
-  // exactement la même suite dans le même ordre, tout en gardant une
-  // tendance générale "plus récent d'abord" (pas un tri aléatoire pur).
-  const poolSize = Math.max(60, skip + limit * 3);
-  const pool = await Post.find({ deleted: { $ne: true } })
-    .sort({ createdAt: -1 })
-    .limit(poolSize)
+  return Post.find({ deleted: { $ne: true } })
+    .sort({ createdAt: -1, _id: -1 })
+    .skip(skip)
+    .limit(limit)
     .lean();
-  const blockSize = 6;
-  for (let i = 0; i < pool.length; i += blockSize) {
-    const end = Math.min(i + blockSize, pool.length);
-    for (let j = end - 1; j > i; j--) {
-      const k = i + Math.floor(Math.random() * (j - i + 1));
-      [pool[j], pool[k]] = [pool[k], pool[j]];
-    }
-  }
-  return pool.slice(skip, skip + limit);
 }
 
 async function getPostsByAuthor(authorId, skip = 0, limit = 20) {
@@ -779,6 +781,26 @@ async function getPostsByAuthor(authorId, skip = 0, limit = 20) {
     .skip(skip)
     .limit(limit)
     .lean();
+}
+
+// Recherche de publications (texte ou description). La saisie est échappée :
+// jamais interprétée comme une expression régulière.
+async function searchPosts(q, skip = 0, limit = 20) {
+  const rx = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  return Post.find({ deleted: { $ne: true }, $or: [{ content: rx }, { description: rx }] })
+    .sort({ createdAt: -1, _id: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+}
+
+// Totaux réels d'un profil (et non ceux de la seule première page chargée).
+async function getUserPostStats(authorId) {
+  const rows = await Post.aggregate([
+    { $match: { authorId: new mongoose.Types.ObjectId(String(authorId)), deleted: { $ne: true } } },
+    { $group: { _id: null, posts: { $sum: 1 }, likes: { $sum: { $ifNull: ['$likesCount', 0] } } } },
+  ]);
+  return { posts: rows[0]?.posts || 0, likes: rows[0]?.likes || 0 };
 }
 
 async function getPostById(id) {
@@ -945,6 +967,7 @@ module.exports = {
   createNotification, getUserNotifications, markNotificationRead,
   markAllNotificationsRead, getUnreadNotificationCount, deleteAllNotifications, consumeNotifications,
   createReport, getReports, updateReportStatus,
+  searchPosts, getUserPostStats, getMessageByClientId,
   createPost, getPosts, getPostsByAuthor, getPostById, getPostsByIds, deletePost,
   getAllUserIdsExcept, createNotificationsBulk,
   createStory, getActiveStories, getStoryById, getUserActiveStories, addStoryView, deleteStory,

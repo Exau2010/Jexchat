@@ -103,7 +103,7 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,
@@ -112,6 +112,13 @@ staticFiles.forEach(file => {
     else res.setHeader('Cache-Control', `public, max-age=${file.endsWith('.png') ? 86400 : 0}`);
     res.sendFile(path.join(__dirname, file));
   });
+});
+
+// Manifeste d'installation (PWA) : mobile et ordinateur.
+app.get('/manifest.webmanifest', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.sendFile(path.join(__dirname, 'manifest.webmanifest'));
 });
 
 app.use(sec.apiLimiter);
@@ -417,7 +424,8 @@ app.get('/api/users/:id', sec.optionalAuth, async (req, res) => {
     if (!sec.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'ID invalide.' });
     const user = await db.findUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
-    return res.json(safeUser(user));
+    const stats = await db.getUserPostStats(req.params.id).catch(() => null);
+    return res.json({ ...safeUser(user), stats });
   } catch (err) {
     return res.status(500).json({ error: 'Erreur.' });
   }
@@ -456,6 +464,8 @@ app.get('/api/users/blocked/list', sec.requireAuth, async (req, res) => {
 });
 
 // ─── Settings Routes ───────────────────────────────────────────────────────────
+// Polices de texte proposées (chargées à la demande côté client, une seule à la fois).
+const FONT_KEYS = ['default', 'rounded', 'mono', 'nunito', 'poppins', 'quicksand', 'fredoka', 'baloo', 'comic', 'caveat', 'patrick', 'pacifico', 'lobster', 'chewy', 'special', 'merri'];
 app.put('/api/settings', sec.requireAuth, async (req, res) => {
   try {
     const { theme, accentColor, notifications, messageFont, privacy, avatarUrl, sounds } = req.body;
@@ -475,7 +485,7 @@ app.put('/api/settings', sec.requireAuth, async (req, res) => {
     }
     if (notifications !== undefined) settings['settings.notifications'] = Boolean(notifications);
     if (sounds !== undefined) settings['settings.sounds'] = Boolean(sounds);
-    if (messageFont !== undefined) settings['settings.messageFont'] = ['default', 'rounded', 'mono'].includes(messageFont) ? messageFont : 'default';
+    if (messageFont !== undefined) settings['settings.messageFont'] = FONT_KEYS.includes(messageFont) ? messageFont : 'default';
     if (privacy !== undefined && typeof privacy === 'object') {
       if (privacy.showOnlineStatus !== undefined) settings['settings.privacy.showOnlineStatus'] = Boolean(privacy.showOnlineStatus);
       if (privacy.showLastSeen !== undefined) settings['settings.privacy.showLastSeen'] = Boolean(privacy.showLastSeen);
@@ -847,8 +857,28 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
     if (!conv || !conv.members.map(String).includes(req.user._id.toString())) {
       return res.status(403).json({ error: 'Accès non autorisé.' });
     }
+    // Blocage : dans une conversation privée, l'envoi est refusé si l'un des
+    // deux membres a bloqué l'autre (pas seulement à l'ouverture).
+    if (conv.type === 'private') {
+      const me = await db.findUserById(req.user._id);
+      const otherId = conv.members.map(String).find((m) => m !== req.user._id.toString());
+      if (me.blockedUsers?.map(String).includes(otherId)) {
+        return res.status(403).json({ error: 'Vous avez bloqué cet utilisateur.' });
+      }
+      const other = await db.findUserById(otherId);
+      if (other?.blockedUsers?.map(String).includes(req.user._id.toString())) {
+        return res.status(403).json({ error: 'Action non autorisée.' });
+      }
+    }
 
     const { content, type, url, replyTo, sharedPostId } = req.body;
+    // Clé d'idempotence : si ce message a déjà été enregistré (renvoi après une
+    // coupure réseau), on renvoie l'existant au lieu d'en créer un doublon.
+    const clientId = (typeof req.body.clientId === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(req.body.clientId)) ? req.body.clientId : undefined;
+    if (clientId) {
+      const dup = await db.getMessageByClientId(req.user._id, clientId);
+      if (dup && dup.conversationId.toString() === req.params.id) return res.status(200).json(safeMessage(dup));
+    }
     const msgType = type || 'text';
     const typeResult = sec.validateMessageType(msgType);
     if (!typeResult.valid) return res.status(400).json({ error: typeResult.error });
@@ -898,9 +928,20 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       sharedPostId: safeSharedPostId,
       replyTo: replyToId,
       seenBy: [req.user._id],
+      ...(clientId ? { clientId } : {}),
     };
 
-    const message = await db.createMessage(msgData);
+    let message;
+    try {
+      message = await db.createMessage(msgData);
+    } catch (e) {
+      // Course entre deux envois simultanés de la même clé : le second renvoie le premier.
+      if (clientId && e && e.code === 11000) {
+        const again = await db.getMessageByClientId(req.user._id, clientId);
+        if (again) return res.status(200).json(safeMessage(again));
+      }
+      throw e;
+    }
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
     await db.updateConversationLastMessage(req.params.id, {
       content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
@@ -1015,6 +1056,10 @@ app.post('/api/messages/:id/react', sec.requireAuth, async (req, res) => {
     const message = await db.getMessageById(req.params.id);
     if (!message) return res.status(404).json({ error: 'Message introuvable.' });
     if (new Date(message.expiresAt) < new Date()) return res.status(403).json({ error: 'Message expiré.' });
+    const conv = await db.getConversationById(message.conversationId);
+    if (!conv || !conv.members.map(String).includes(req.user._id.toString())) {
+      return res.status(403).json({ error: 'Accès non autorisé.' });
+    }
     const typeResult = sec.validateReactionType(req.body.type);
     if (!typeResult.valid) return res.status(400).json({ error: typeResult.error });
     const existing = message.reactions?.find((r) => r.userId.toString() === req.user._id.toString());
@@ -1024,7 +1069,6 @@ app.post('/api/messages/:id/react', sec.requireAuth, async (req, res) => {
       await db.addReaction(req.params.id, req.user._id, req.body.type);
     }
     const updated = await db.getMessageById(req.params.id);
-    const conv = await db.getConversationById(message.conversationId);
     if (conv) {
       for (const m of conv.members) {
         io.to(`user:${m.toString()}`).emit('message_reaction', safeMessage(updated));
@@ -1170,7 +1214,7 @@ app.post('/api/notifications/consume', sec.requireAuth, async (req, res) => {
 app.post('/api/reports', sec.requireAuth, async (req, res) => {
   try {
     const { targetType, targetId, reason } = req.body;
-    const allowedTypes = ['user', 'message', 'conversation'];
+    const allowedTypes = ['user', 'message', 'conversation', 'post'];
     if (!allowedTypes.includes(targetType)) return res.status(400).json({ error: 'Type invalide.' });
     if (!sec.isValidObjectId(targetId)) return res.status(400).json({ error: 'ID invalide.' });
     const reasonResult = sec.validateReportReason(reason);
@@ -1254,6 +1298,21 @@ app.get('/api/posts/user/:id', sec.optionalAuth, async (req, res) => {
     const posts = await db.getPostsByAuthor(req.params.id, skip, limit);
     return res.json(await enrichPosts(posts, req.user?._id?.toString()));
   } catch (err) {
+    return res.status(500).json({ error: 'Erreur.' });
+  }
+});
+
+// Recherche de publications (Explorer). Déclarée AVANT /api/posts/:id.
+app.get('/api/posts/search', sec.requireAuth, sec.searchLimiter, async (req, res) => {
+  try {
+    const q = sec.sanitizeText(String(req.query.q || '')).trim().substring(0, 60);
+    if (q.length < 2) return res.json([]);
+    const skip = Math.max(0, parseInt(req.query.skip) || 0);
+    const limit = Math.min(parseInt(req.query.limit) || 15, 30);
+    const posts = await db.searchPosts(q, skip, limit);
+    return res.json(await enrichPosts(posts, req.user._id.toString()));
+  } catch (err) {
+    console.error('[Posts] search', err.message);
     return res.status(500).json({ error: 'Erreur.' });
   }
 });
@@ -1851,7 +1910,7 @@ io.on('connection', async (socket) => {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socket.id);
   await db.updateUserOnlineStatus(userId, true);
-  io.emit('user_online', { userId, username: socket.username });
+  if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
 
   // ── Heartbeat ──
   const heartbeatInterval = setInterval(async () => {
@@ -1896,7 +1955,7 @@ io.on('connection', async (socket) => {
         onlineUsers.delete(userId);
         const lastSeen = new Date();
         await db.updateUserOnlineStatus(userId, false);
-        io.emit('user_offline', { userId, lastSeen });
+        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, lastSeen });
       }
     }
   });
@@ -1905,13 +1964,15 @@ io.on('connection', async (socket) => {
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function safeUser(user) {
   if (!user) return null;
+  const showOnline = user.settings?.privacy?.showOnlineStatus !== false;
+  const showLastSeen = user.settings?.privacy?.showLastSeen !== false;
   return {
     id: user._id,
     username: user.username,
     identity: user.identity,
     avatarUrl: user.avatarUrl || '',
-    isOnline: user.isOnline,
-    lastSeen: user.lastSeen,
+    isOnline: showOnline ? user.isOnline : false,
+    lastSeen: showLastSeen ? user.lastSeen : null,
     roles: user.roles,
     settings: user.settings ? { theme: user.settings.theme, accentColor: user.settings.accentColor } : undefined,
   };
@@ -1982,7 +2043,12 @@ async function enrichMessages(messages) {
   const postMap = new Map(posts.map((p) => [p._id.toString(), p]));
   const replyMap = new Map(replySources.map((r) => [r._id.toString(), r]));
 
+  const senderIds = [...new Set(base.map((m) => m.senderId.toString()))];
+  const senders = senderIds.length ? await db.findUsersByIds(senderIds) : [];
+  const senderMap = new Map(senders.map((s) => [s._id.toString(), s]));
+
   return base.map((m) => {
+    m = { ...m, sender: safeUser(senderMap.get(m.senderId.toString())) };
     let out = m;
     if (m.sharedPostId) {
       const post = postMap.get(m.sharedPostId.toString());

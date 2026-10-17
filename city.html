@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#1d3550">
+<title>JexCity</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/city.css">
+<!-- Three.js : version figée, servie par jsDelivr (autorisé par la CSP de JexChat). Aucun autre script externe. -->
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
+</head>
+<body>
+<canvas id="gl" tabindex="0" aria-label="Ville 3D JexCity"></canvas>
+
+<div id="hud" hidden>
+  <a id="b-home" class="fab" href="/" aria-label="Retour à JexChat" data-ic="back"></a>
+  <div id="hud-right">
+    <button class="fab" data-act="search" aria-label="Rechercher" data-ic="search"></button>
+    <button class="fab" data-act="map" aria-label="Carte de la ville" data-ic="map"></button>
+    <button class="fab" data-act="phone" aria-label="Téléphone" data-ic="phone"></button>
+    <button class="fab" data-act="notifs" aria-label="Notifications" data-ic="bell"><span class="badge" id="notif-badge" hidden></span></button>
+    <button class="fab" data-act="settings" aria-label="Réglages" data-ic="gear"></button>
+  </div>
+  <button id="mood-chip" aria-label="Mon humeur">Dire quelque chose…</button>
+  <div id="hint">Touchez le sol pour marcher</div>
+  <div id="campad">glisser ici<br>pour tourner</div>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<aside id="sheet" hidden role="dialog" aria-modal="false">
+  <header><button class="fab" id="sheet-back" aria-label="Retour" data-ic="back" hidden></button><b id="sheet-title"></b><button class="fab" id="sheet-close" aria-label="Fermer" data-ic="close"></button></header>
+  <div id="sheet-body"></div>
+</aside>
+
+<div id="loader"><div class="ld-title">JexCity</div><div class="ld-sub" id="ld-msg">Chargement de la ville…</div><div class="ld-bar"><i></i></div></div>
+<div id="fatal" hidden><div class="ld-title">JexCity</div><div class="ld-sub" id="fatal-msg"></div><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center"><button class="btn primary" id="fatal-retry">Réessayer</button><a class="btn" id="fatal-home" href="/">Retour à JexChat</a></div></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/city-main.js"></script>
+</body>
+</html>

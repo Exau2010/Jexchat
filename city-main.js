@@ -1,0 +1,173 @@
+// city-main.js — JexCity : démarrage, rendu, boucle principale, déplacement du joueur.
+// Qualité adaptative (3 niveaux), perte de contexte WebGL gérée, boucle suspendue quand l'onglet est caché.
+import * as THREE from 'three';
+import * as G from './city-geo.js';
+import { createWorld } from './city-world.js';
+import { createControls } from './city-controls.js';
+import { createAvatar } from './city-avatar.js';
+import { createSocial } from './city-social.js';
+import { createPosts } from './city-posts.js';
+import { createUI } from './city-ui.js';
+import { api } from './city-api.js';
+
+const $ = (s) => document.querySelector(s);
+const TIERS = {
+  low:  { name: 'low',  tex: 256,  shadows: 0,    trees: 220, fogMul: 1.25, pr: 1,    aa: false },
+  mid:  { name: 'mid',  tex: 512,  shadows: 1024, trees: 500, fogMul: 1,    pr: 1.25, aa: false },
+  high: { name: 'high', tex: 1024, shadows: 2048, trees: 800, fogMul: 1,    pr: 2,    aa: true },
+};
+function fatal(msg, retry = true) {
+  $('#loader').classList.add('done'); $('#hud').hidden = true;
+  $('#fatal-msg').textContent = msg; $('#fatal-retry').hidden = !retry; $('#fatal').hidden = false;
+}
+$('#fatal-retry').addEventListener('click', () => location.reload());
+addEventListener('unhandledrejection', (e) => console.warn('[JexCity]', e.reason));
+
+function detectTier() {
+  const coarse = matchMedia('(pointer:coarse)').matches, mem = navigator.deviceMemory || 4, cores = navigator.hardwareConcurrency || 4;
+  if (coarse && (mem <= 3 || cores <= 4)) return TIERS.low;
+  if (coarse || mem <= 4) return TIERS.mid;
+  return TIERS.high;
+}
+function pickTier() { const saved = localStorage.getItem('jexcity.tier'); return TIERS[saved] || detectTier(); }
+
+async function boot() {
+  // 1) Session JexChat existante (cookie HttpOnly, même origine). Sinon : retour à la connexion.
+  let me;
+  try { me = await api.me(); } catch (e) {
+    if (e.status === 401) { $('#fatal-home').textContent = 'Se connecter à JexChat'; return fatal('Connectez-vous à JexChat pour entrer dans JexCity.', false); }
+    return fatal(e.message);
+  }
+  me.id = String(me.id);
+  let config = { muted: [] }; try { config = await api.config(); } catch (_) { /* sourdine indisponible : non bloquant */ }
+
+  // 2) Rendu
+  let tier = pickTier();
+  const canvas = $('#gl');
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: tier.aa, powerPreference: 'high-performance', alpha: false });
+  } catch (_) { return fatal('Votre navigateur ne peut pas afficher la 3D (WebGL indisponible).', false); }
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(55, 1, 0.5, 1600);
+  const applySize = () => {
+    const pr = Math.min(devicePixelRatio || 1, tier.pr);
+    renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight, false);
+    camera.aspect = innerWidth / Math.max(1, innerHeight); camera.updateProjectionMatrix();
+  };
+  applySize(); addEventListener('resize', applySize); addEventListener('orientationchange', () => setTimeout(applySize, 250));
+
+  // 3) Monde
+  $('#ld-msg').textContent = 'Construction de la ville…';
+  await new Promise((r) => setTimeout(r, 30)); // laisse le navigateur afficher le message
+  const layout = G.buildLayout(7);
+  let world;
+  try { world = createWorld({ scene, layout, tier }); } catch (e) { console.error(e); return fatal('Impossible de construire la ville : ' + e.message); }
+  const pickables = world.pickables;
+
+  // 4) Joueur (position restaurée après une perte de contexte)
+  const saved = (() => { try { return JSON.parse(sessionStorage.getItem('jexcity.pos')); } catch (_) { return null; } })();
+  const sp = saved && G.isFree(layout, saved.x, saved.z) ? [saved.x, saved.z] : G.spawnPoint();
+  const player = { x: sp[0], z: sp[1], path: [], speed: 4.2, stuck: 0, dest: null };
+  const av = createAvatar({ colorA: me.identity?.colorA, colorB: me.identity?.colorB, name: me.username });
+  scene.add(av.group);
+  const posV = new THREE.Vector3(player.x, G.groundY(player.x, player.z), player.z);
+  const marker = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.5, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xf0b463, transparent: true, opacity: 0, depthWrite: false }));
+  scene.add(marker);
+
+  const socket = window.io ? window.io({ transports: ['websocket', 'polling'] }) : null;
+  if (!socket) return fatal('Connexion temps réel indisponible.');
+  const social = createSocial({ scene, layout, pickables, socket, getSelf: () => player });
+  const posts = createPosts({ world, pickables });
+
+  let ui; let mood = '';
+  const walkTo = (x, z) => {
+    const path = G.planPath(layout, [player.x, player.z], [x, z]);
+    if (!path.length) return;
+    player.path = path; player.stuck = 0; player.dest = path[path.length - 1];
+    marker.position.set(player.dest[0], G.groundY(player.dest[0], player.dest[1]) + 0.05, player.dest[1]); marker.material.opacity = 0.9;
+    social.emitMove(player.x, player.z, player.dest[0], player.dest[1]);
+    $('#hint').style.opacity = 0;
+  };
+  const controls = createControls({
+    camera, dom: canvas, layout, pickables, padEl: $('#campad'),
+    onGround: (pt) => walkTo(pt.x, pt.z),
+    onBuilding: (hit) => {
+      const kind = hit.object.userData.pick;
+      if (kind === 'avatar') { const r = social.remotes.get(hit.object.userData.userId); if (r) ui.showUser({ ...r.user, id: r.id }); }
+      else if (kind === 'boat') { const p = posts.select(hit.object.userData.index); if (p) ui.showPost(p, () => posts.release()); }
+      else walkTo(hit.point.x, hit.point.z); // façade : on rejoint le point libre le plus proche
+    },
+  });
+  controls.snap(posV);
+
+  ui = createUI({
+    me, socket,
+    ctl: {
+      muted: config.muted, layout, walkTo,
+      remote: (id) => social.remotes.get(id), remotes: () => [...social.remotes.values()], self: () => player, landmarks: () => world.landmarks,
+      removeRemote: (id) => social.remove(id),
+      getMood: () => mood, setMood: (t) => { mood = (t || '').trim().slice(0, 40); social.setMood(mood); ui.setMoodLabel(mood); },
+      getHour: () => world.state.hour, setHour: (h) => world.setHour(h),
+      isLight: () => tier.name === 'low',
+      setLight: (on) => { if (on) { localStorage.setItem('jexcity.tier', 'low'); setTier(TIERS.low); } else { localStorage.removeItem('jexcity.tier'); const d = detectTier(); setTier(d.name === 'low' ? TIERS.mid : d); } },
+    },
+  });
+  function setTier(t) { tier = t; world.setTier(t); applySize(); }
+
+  // Heure réelle de l'utilisateur (modifiable dans les réglages)
+  const now = new Date(); world.setHour(now.getHours() + now.getMinutes() / 60);
+
+  // Réseau social : présence + publications portées par les bateaux
+  social.onError = (m) => ui.toast(m);
+  const connectJoin = () => social.join(mood);
+  if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
+  const loadPosts = () => api.latestPosts(world.boats.length).then((p) => posts.assign(p)).catch(() => {});
+  loadPosts(); setInterval(() => { if (!ui.isOpen() && !document.hidden) loadPosts(); }, 180000);
+
+  // 5) Boucle
+  const clock = new THREE.Clock(); let t = 0, running = true, frames = 0, fpsT = 0, adapt = 0, saveT = 0;
+  function frame() {
+    if (!running) return;
+    const dt = Math.min(clock.getDelta(), 0.05); t += dt;
+    // déplacement
+    if (player.path.length) {
+      const [wx, wz] = player.path[0], dx = wx - player.x, dz = wz - player.z, d = Math.hypot(dx, dz);
+      if (d < 0.25) { player.path.shift(); }
+      else {
+        const s = Math.min(d, player.speed * dt), [nx, nz] = G.slideMove(layout, player.x, player.z, player.x + dx / d * s, player.z + dz / d * s);
+        if (Math.hypot(nx - player.x, nz - player.z) < s * 0.25) { player.stuck += dt; if (player.stuck > 0.5) player.path.length = 0; } else { player.stuck = 0; player.x = nx; player.z = nz; }
+        av.face(Math.atan2(dx, dz), dt);
+      }
+      if (!player.path.length) { social.emitMove(player.x, player.z, player.x, player.z); player.dest = null; }
+    }
+    av.setWalking(player.path.length > 0);
+    posV.set(player.x, G.groundY(player.x, player.z), player.z); av.group.position.copy(posV); av.update(dt, t);
+    if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
+    controls.update(dt, posV);
+    world.followShadow(posV); world.update(t, dt, camera.position);
+    social.update(dt, t, camera.position); posts.update(camera.position);
+    renderer.render(scene, camera);
+    // sauvegarde de position (reprise après perte de contexte) + qualité adaptative
+    saveT += dt; if (saveT > 2) { saveT = 0; try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} }
+    frames++; fpsT += dt;
+    if (fpsT >= 3) {
+      const fps = frames / fpsT; frames = 0; fpsT = 0; window.__jexcityFps = Math.round(fps);
+      if (fps < 24 && tier.name !== 'low' && adapt < 2) { adapt++; setTier(tier.name === 'high' ? TIERS.mid : TIERS.low); ui.toast('Qualité réduite pour rester fluide'); }
+    }
+  }
+  const start = () => { running = true; clock.getDelta(); renderer.setAnimationLoop(frame); };
+  const stop = () => { running = false; renderer.setAnimationLoop(null); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
+  addEventListener('pagehide', () => { social.leave(); try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} });
+
+  // Perte de contexte WebGL : on met en pause, puis on recharge la scène à la restauration (position conservée).
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); stop(); ui.toast('Affichage interrompu, reprise…'); });
+  canvas.addEventListener('webglcontextrestored', () => { try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} location.reload(); });
+
+  $('#hud').hidden = false; $('#loader').classList.add('done'); start();
+  setTimeout(() => { $('#hint').style.opacity = 0; }, 9000);
+  window.__jexcity = { renderer, scene, world, player, social, tier: () => tier.name }; // diagnostic (console)
+}
+boot().catch((e) => { console.error(e); fatal('Erreur au démarrage : ' + (e?.message || e)); });

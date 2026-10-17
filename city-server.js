@@ -55,10 +55,23 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-world.js', 'city-controls.js', 'city-avatar.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js'];
+
+// Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
+const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];
+// Ressources 3D locales de JexCity (modèles GLB, textures) : noms simples uniquement, pas de sous-dossier.
+const ASSET_RE = /^[a-z0-9_-]+\.(glb|jpg|png|webp)$/i;
 
 function mountStatic(app) {
   const noCache = (res) => res.setHeader('Cache-Control', 'no-cache');
+  for (const f of VENDOR_FILES) {
+    app.get('/' + f, (req, res) => { res.setHeader('Cache-Control', 'public, max-age=86400'); res.sendFile(path.join(CITY_DIR, f)); });
+  }
+  app.get('/city-assets/:name', (req, res) => {
+    if (!ASSET_RE.test(req.params.name)) return res.status(404).end();
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(CITY_DIR, 'city-assets', req.params.name), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  });
   const page = (req, res) => { noCache(res); res.sendFile(path.join(CITY_DIR, 'city.html')); };
   app.get('/city', page);
   app.get('/city/', page);

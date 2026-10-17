@@ -50,6 +50,7 @@ button{font:inherit;color:inherit}
 .field:focus{border-color:var(--acc)}
 .card{background:var(--glass2);border:1px solid var(--line);border-radius:14px;padding:12px;margin:8px 0}
 .card img{max-width:100%;border-radius:10px;margin-top:8px;display:block}
+.card video{max-width:100%;max-height:60vh;border-radius:10px;margin-top:8px;display:block;background:#000}
 .msgs{display:flex;flex-direction:column;gap:6px;padding:6px 0 10px}
 .msg{max-width:82%;padding:8px 12px;border-radius:16px;background:var(--glass2);word-break:break-word;white-space:pre-wrap}
 .msg.me{align-self:flex-end;background:var(--acc);color:#2a1d08}

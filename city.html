@@ -7,8 +7,8 @@
 <title>JexCity</title>
 <link rel="icon" href="/icon-192.png">
 <link rel="stylesheet" href="/city.css">
-<!-- Three.js : version figée, servie par jsDelivr (autorisé par la CSP de JexChat). Aucun autre script externe. -->
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
+<!-- Three.js r160 (MIT) : copie locale à la racine (aucun CDN). Les add-ons (GLTFLoader, BufferGeometryUtils) sont aussi à la racine. -->
+<script type="importmap">{"imports":{"three":"/three.module.min.js","three/addons/":"/"}}</script>
 </head>
 <body>
 <canvas id="gl" tabindex="0" aria-label="Ville 3D JexCity"></canvas>

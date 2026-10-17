@@ -48,7 +48,8 @@ async function boot() {
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: tier.aa, powerPreference: 'high-performance', alpha: false });
   } catch (_) { return fatal('Votre navigateur ne peut pas afficher la 3D (WebGL indisponible).', false); }
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = tier.name === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, 1, 0.5, 1600);
   const applySize = () => {
@@ -63,7 +64,7 @@ async function boot() {
   await new Promise((r) => setTimeout(r, 30)); // laisse le navigateur afficher le message
   const layout = G.buildLayout(7);
   let world;
-  try { world = createWorld({ scene, layout, tier }); } catch (e) { console.error(e); return fatal('Impossible de construire la ville : ' + e.message); }
+  try { world = createWorld({ scene, layout, tier, renderer }); } catch (e) { console.error(e); return fatal('Impossible de construire la ville : ' + e.message); }
   const pickables = world.pickables;
 
   // 4) Joueur (position restaurée après une perte de contexte)
@@ -168,6 +169,6 @@ async function boot() {
 
   $('#hud').hidden = false; $('#loader').classList.add('done'); start();
   setTimeout(() => { $('#hint').style.opacity = 0; }, 9000);
-  window.__jexcity = { renderer, scene, world, player, social, tier: () => tier.name }; // diagnostic (console)
+  window.__jexcity = { renderer, scene, camera, controls, world, player, social, tier: () => tier.name }; // diagnostic (console)
 }
 boot().catch((e) => { console.error(e); fatal('Erreur au démarrage : ' + (e?.message || e)); });

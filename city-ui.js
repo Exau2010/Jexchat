@@ -106,8 +106,15 @@ export function createUI({ me, socket, ctl }) {
     const card = h('div', { class: 'card' },
       h('div', { class: 'row', style: 'padding:0;min-height:40px', onclick: () => showUser(a) }, pill(a, 34), h('div', { class: 'grow' }, h('b', { text: a.username || '' }), h('div', { class: 'sub', text: when(p.createdAt) }))),
       h('div', { style: 'margin-top:8px;white-space:pre-wrap;word-break:break-word', text: postText(p) }));
-    if (media && mt === 'image') card.append(h('img', { src: media, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }));
-    else if (media) card.append(h('a', { href: media, target: '_blank', rel: 'noopener noreferrer', class: 'sub', text: 'Ouvrir le média' }));
+    // Médias : image, vidéo lisible dans la carte (https uniquement) ; en cas d'échec de chargement, repli sur un lien.
+    const mediaLink = () => h('a', { href: media, target: '_blank', rel: 'noopener noreferrer', class: 'sub', text: 'Ouvrir le média' });
+    const fallback = (el) => () => { if (el.parentNode) el.replaceWith(mediaLink()); };
+    if (media && mt === 'image') { const im = h('img', { src: media, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }); im.addEventListener('error', fallback(im), { once: true }); card.append(im); }
+    else if (media && mt === 'video') {
+      const v = h('video', { src: media, controls: true, playsinline: true, preload: 'metadata', referrerpolicy: 'no-referrer', 'aria-label': 'Vidéo de la publication' });
+      v.addEventListener('error', fallback(v), { once: true }); card.append(v);
+    }
+    else if (media) card.append(mediaLink());
     if (!compact) {
       const like = btn(`♥ ${p.likesCount || 0}`, () => guarded(like, async () => { await api.like(sid(p)); p.likedByMe = !p.likedByMe; p.likesCount = (p.likesCount || 0) + (p.likedByMe ? 1 : -1); like.textContent = `♥ ${p.likesCount}`; }));
       card.append(h('div', { class: 'actions', style: 'margin-bottom:0' }, like,

@@ -4,7 +4,7 @@
 // aucun profil n'est copié, on lit celui de JexChat. Aucune ressource externe.
 import * as THREE from 'three';
 import { heightToNormal } from './city-textures.js';
-import { SKIN as SKINS, HAIR as HAIRS, cleanLook } from './city-look.js';
+import { SKIN as SKINS, HAIR as HAIRS, TOPS, PANTS, SHOES, EYES, cleanLook } from './city-look.js';
 
 const SKIN = '#c98f6b', HAIR = '#1d1612', JEANS = '#27324a', SOLE = '#ece8df';
 const matCache = new Map();
@@ -48,8 +48,8 @@ function ball(r, material, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, seg = 16
 export function createAvatar({ colorA, colorB, name = '', look } = {}) {
   const L = cleanLook(look), fem = L.s === 1;
   const A = safeColor(colorA, '#3b4256'), B = safeColor(colorB, '#e8c882');
-  const top = mat(A, 0.9, true), trim = mat(B, 0.7), skin = mat(SKINS[L.sk] || SKIN, 0.55), hair = mat(HAIRS[L.hc] || HAIR, 0.5), jeans = mat(JEANS, 0.9, true), sole = mat(SOLE, 0.7), shoe = mat('#d9d6cf', 0.75);
-  const eyeW = mat('#f4f1ec', 0.3), iris = mat('#1a1410', 0.2), lipM = mat(fem ? '#b5545c' : '#9a5a4c', 0.5);
+  const top = mat(L.tc ? TOPS[L.tc - 1] : A, 0.9, true), trim = mat(B, 0.7), skin = mat(SKINS[L.sk] || SKIN, 0.55), hair = mat(HAIRS[L.hc] || HAIR, 0.5), jeans = mat(PANTS[L.pc] || JEANS, 0.9, true), sole = mat(SOLE, 0.7), shoe = mat(SHOES[L.sc] || '#d9d6cf', 0.75);
+  const eyeW = mat('#f4f1ec', 0.3), iris = mat(EYES[L.ey] || '#1a1410', 0.2), lipM = mat(fem ? '#b5545c' : '#9a5a4c', 0.5);
   const dark = mat('#1b1b22', 0.4);
 
   const group = new THREE.Group();
@@ -80,11 +80,18 @@ export function createAvatar({ colorA, colorB, name = '', look } = {}) {
     headP.add(cap(L.h === 4 ? 0.1165 : 0.119, L.h === 4 ? 0.4 : 0.56));
     if (L.h !== 4) headP.add(ball(0.095, hair, 0, 0.115, -0.04, 1, 0.8, 1, 14)); // nuque
     if (L.h === 1) { const back = limb(0.3, 0.07, hair, 1.25, 0.7); back.position.set(0, 0.1, -0.085); headP.add(back); for (const sx of [-1, 1]) { const side = limb(0.2, 0.026, hair); side.position.set(sx * 0.1, 0.1, -0.02); headP.add(side); } }
+    if (L.h === 6) { for (const sx of [-1, 1]) { const side = limb(0.17, 0.045, hair, 1, 1.3); side.position.set(sx * 0.1, 0.06, -0.01); headP.add(side); } const bk = limb(0.17, 0.08, hair, 1.3, 0.7); bk.position.set(0, 0.06, -0.085); headP.add(bk); }
+    if (L.h === 7) headP.add(ball(0.16, hair, 0, 0.14, -0.02, 1, 0.95, 1, 16));
     if (L.h === 2) { headP.add(ball(0.03, hair, 0, 0.17, -0.12, 1, 1, 1, 10)); const tail = limb(0.22, 0.028, hair); tail.position.set(0, 0.15, -0.14); tail.rotation.x = -0.35; headP.add(tail); }
     if (L.h === 3) for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2; headP.add(ball(0.04, hair, Math.sin(a) * 0.095, 0.17 + (i % 2) * 0.03, Math.cos(a) * 0.09 - 0.02, 1, 1, 1, 8)); }
   }
   if (L.ac === 1) { for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.004, 6, 16), dark); g.position.set(sx * 0.04, 0.105, 0.108); headP.add(g); } const br = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.004, 0.004), dark); br.position.set(0, 0.108, 0.11); headP.add(br); }
   if (L.ac === 2) { const c = ball(0.124, trim, 0, 0.124, -0.004, 0.95, 1, 1.02, 20); c.geometry.dispose(); c.geometry = new THREE.SphereGeometry(0.124, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5); headP.add(c); const v = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.008, 0.08), trim); v.position.set(0, 0.138, 0.13); v.rotation.x = 0.12; headP.add(v); }
+  if (L.ac === 4) { const c = ball(0.126, trim, 0, 0.13, -0.004, 0.95, 1, 1.02, 18); c.geometry.dispose(); c.geometry = new THREE.SphereGeometry(0.126, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55); headP.add(c); headP.add(ball(0.03, trim, 0, 0.26, 0, 1, 1, 1, 8)); }
+  if (L.ac === 5) { const cr = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.014, 6, 20), mat('#f1c40f', 0.3)); cr.rotation.x = Math.PI / 2; cr.position.y = 0.225; headP.add(cr); for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2, t = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.04, 5), mat('#f1c40f', 0.3)); t.position.set(Math.sin(a) * 0.1, 0.25, Math.cos(a) * 0.1); headP.add(t); } }
+  if (L.bd === 1) { const b = ball(0.078, hair, 0, 0.035, 0.03, 1, 0.8, 1, 14); b.material = mat(HAIRS[L.hc] || HAIR, 0.8); headP.add(b); }
+  if (L.bd === 2) { const b = ball(0.085, hair, 0, 0.0, 0.035, 1, 1.1, 1, 14); headP.add(b); }
+  if (L.bd === 3) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.012), hair); m.position.set(0, 0.058, 0.118); headP.add(m); }
   if (L.ac === 3) { const b = new THREE.Mesh(new THREE.TorusGeometry(0.108, 0.012, 6, 24), trim); b.rotation.x = Math.PI / 2; b.position.y = 0.15; b.scale.set(0.95, 1, 1.02); headP.add(b); }
   for (const s of [-1, 1]) {
     headP.add(ball(0.019, skin, s * 0.107, 0.085, 0, 0.5, 1.2, 1, 8));       // oreilles

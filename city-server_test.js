@@ -142,7 +142,7 @@ const join = (s, data = {}) => new Promise((r) => s.h['city:join'](data, r));
   }
 
   // ─── apparence ───
-  ok(JSON.stringify(cleanLook({ s: 1, h: 99, hc: 'x', sk: 2, ac: -1 })) === JSON.stringify({ s: 1, h: 0, hc: 0, sk: 2, ac: 0 }), 'apparence : indices invalides ramenés aux valeurs par défaut');
+  ok(JSON.stringify(cleanLook({ s: 1, h: 99, hc: 'x', sk: 2, ac: -1 })) === JSON.stringify({ s: 1, h: 0, hc: 0, sk: 2, ac: 0, tc: 0, pc: 0, sc: 0, ey: 0, bd: 0 }), 'apparence : indices invalides ramenés aux valeurs par défaut');
 
   // ─── blocage en cours de session : disparition puis réapparition, sans restaurer de relation ───
   for (const id of ['px', 'py']) users[id] = { _id: id, username: id, blockedUsers: [], settings: {} };
@@ -228,7 +228,7 @@ const join = (s, data = {}) => new Promise((r) => s.h['city:join'](data, r));
     for (let k = 0; k < 3; k++) { clock += 1000; await emit(PX, 'game:shoot', { id: iv.id, a: 0 }); }
     s0 = ev('game:state').pop().p; const me = s0.ps.find((p) => p.id === 'px'), you = s0.ps.find((p) => p.id === 'py');
     ok(me.score === 1 && you.dead === true && you.hp === 3, 'tir : 3 touches = 1 point, adversaire éliminé puis réapparaît');
-    for (let k = 0; k < 40; k++) { clock += 1000; if (ev('game:state').pop().p.status === 'over') break; await emit(PY, 'game:pos', { id: iv.id, x: 220, y: 100 }); await emit(PX, 'game:shoot', { id: iv.id, a: 0 }); }
+    for (let k = 0; k < 40; k++) { clock += 1000; if (ev('game:state').pop().p.status === 'over') break; const ps = ev('game:state').pop().p.ps, A = ps.find((q) => q.id === 'px'), B = ps.find((q) => q.id === 'py'); await emit(PX, 'game:shoot', { id: iv.id, a: Math.atan2(B.y - A.y, B.x - A.x) }); }
     s0 = ev('game:state').pop().p; ok(s0.status === 'over' && s0.winner === 'px', 'tir : victoire au score, décidée par le serveur');
     G.onBlockChange('px', 'py');
   }

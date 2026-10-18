@@ -38,8 +38,8 @@ function clampNum(v, min, max) {
 function safeColor(c) { return typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : ''; }
 
 // Apparence : uniquement des indices validés (la palette est définie côté client) → rien d'arbitraire n'est stocké ni diffusé.
-const LOOK_MAX = { s: 1, h: 5, hc: 7, sk: 7, ac: 3 };
-const DEFAULT_LOOK = { s: 0, h: 0, hc: 0, sk: 3, ac: 0 };
+const LOOK_MAX = { s: 1, h: 7, hc: 7, sk: 7, ac: 5, tc: 8, pc: 6, sc: 5, ey: 4, bd: 3 };
+const DEFAULT_LOOK = { s: 0, h: 0, hc: 0, sk: 3, ac: 0, tc: 0, pc: 0, sc: 0, ey: 0, bd: 0 };
 function cleanLook(v) {
   const out = { ...DEFAULT_LOOK };
   if (!v || typeof v !== 'object') return out;
@@ -73,7 +73,7 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js'];
 
 // Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
 const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];

@@ -9,6 +9,7 @@ import { createSocial } from './city-social.js';
 import { createPosts } from './city-posts.js';
 import { createUI, h } from './city-ui.js';
 import { createGamesClient } from './city-games.js';
+import { createSolo } from './city-solo.js';
 import { cleanLook, loadLocalLook, saveLocalLook } from './city-look.js';
 import { disposeAvatar } from './city-social.js';
 import { api } from './city-api.js';
@@ -127,7 +128,8 @@ async function boot() {
     me, socket,
     ctl: {
       muted: config.muted, layout, walkTo,
-      games: { invite: (id, name) => games.invite(id, name) },
+      games: { invite: (id, name, g) => { solo.close(); return games.invite(id, name, g); } },
+      solo: { start: (k) => { if (games.active) return ui.toast('Quittez d’abord votre partie multijoueur.'); solo[k](); } },
       look: { get: () => look, set: setLook },
       remote: (id) => social.remotes.get(id), remotes: () => [...social.remotes.values()], self: () => player, landmarks: () => world.landmarks,
       removeRemote: (id) => social.remove(id),
@@ -138,6 +140,8 @@ async function boot() {
     },
   });
   games = createGamesClient({ socket, me, h, toast: (m) => ui.toast(m) });
+  socket.on('game:state', () => solo.close()); // une partie multijoueur qui démarre remplace le jeu solo
+  const solo = createSolo({ h, toast: (m) => ui.toast(m) });
   function setTier(t) { tier = t; world.setTier(t); applySize(); }
 
   // Heure réelle de l'utilisateur (modifiable dans les réglages)

@@ -3,7 +3,7 @@
 import * as G from './city-geo.js';
 import { api, postText, safeHttps } from './city-api.js';
 import { buildPlayer, embeddable } from './city-media.js';
-import { SKIN, HAIR, SKIN_NAMES, HAIR_NAMES, STYLES, ACCESSORIES } from './city-look.js';
+import { SKIN, HAIR, SKIN_NAMES, HAIR_NAMES, STYLES, ACCESSORIES, TOPS, TOP_NAMES, PANTS, PANT_NAMES, SHOES, SHOE_NAMES, EYES, EYE_NAMES, BEARDS } from './city-look.js';
 
 const I = {
   back: '<path d="M15 5l-7 7 7 7"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -337,7 +337,9 @@ export function createUI({ me, socket, ctl }) {
         ...(here.length ? here.map((r) => h('div', { class: 'row', style: 'cursor:default' }, pill(r.user, 38), h('div', { class: 'grow' }, h('b', { text: r.user.username })),
           h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, ...[['Morpion', 'ttt'], ['Course', 'race'], ['Tir', 'shoot']].map(([l, g]) => { const b = btn(l, () => guarded(b, () => ctl.games.invite(r.id, r.user.username, g)), 'primary'); return b; }))))
           : [h('div', { class: 'sub wrap', text: 'Personne d’autre n’est dans la ville pour l’instant. Touchez un joueur pour l’inviter quand il arrive.' })]),
-        h('p', { class: 'sub wrap', text: 'Tir arcade : balles en mousse, 3 vies, 60 s ou 5 points. Course : 2 tours, chrono mesuré par le serveur.' }));
+        h('h4', { text: 'Solo — sans réseau' }),
+        h('div', { class: 'actions', style: 'margin-top:0' }, btn('Morpion contre l’ordinateur', () => ctl.solo.start('ttt'), 'primary'), btn('Contre-la-montre', () => ctl.solo.start('race'), 'primary'), btn('Cibles', () => ctl.solo.start('targets'), 'primary')),
+        h('p', { class: 'sub wrap', text: 'Les records sont gardés sur cet appareil. Tir arcade : balles en mousse, 3 vies, 60 s ou 5 points. Course : 2 tours, chrono mesuré par le serveur.' }));
       return list;
     });
   }
@@ -349,9 +351,11 @@ export function createUI({ me, socket, ctl }) {
       const root = h('div', null);
       const set = (k, v) => { look = { ...look, [k]: v }; ctl.look.set(look); draw(); };
       const seg = (title, items, key) => h('div', null, h('h4', { text: title }), h('div', { class: 'seg' }, ...items.map((label, i) => h('button', { class: 'chip' + (look[key] === i ? ' on' : ''), 'aria-pressed': look[key] === i ? 'true' : 'false', onclick: () => set(key, i), text: label }))));
-      const sw = (title, colors, names, key) => h('div', null, h('h4', { text: title }), h('div', { class: 'seg' }, ...colors.map((c, i) => h('button', { class: 'sw' + (look[key] === i ? ' on' : ''), style: `background:${c}`, 'aria-label': names[i], 'aria-pressed': look[key] === i ? 'true' : 'false', title: names[i], onclick: () => set(key, i) }))));
+      const sw = (title, colors, names, key, off = 0) => h('div', null, off ? null : h('h4', { text: title }), h('div', { class: 'seg' }, ...colors.map((c, i) => h('button', { class: 'sw' + (look[key] === i + off ? ' on' : ''), style: `background:${c}`, 'aria-label': names[i], 'aria-pressed': look[key] === i + off ? 'true' : 'false', title: names[i], onclick: () => set(key, i + off) }))));
       function draw() {
-        root.replaceChildren(seg('Apparence', ['Masculine', 'Féminine'], 's'), sw('Teint de peau', SKIN, SKIN_NAMES, 'sk'), seg('Coiffure', STYLES, 'h'), sw('Couleur des cheveux', HAIR, HAIR_NAMES, 'hc'), seg('Accessoire', ACCESSORIES, 'ac'),
+        root.replaceChildren(seg('Apparence', ['Masculine', 'Féminine'], 's'), sw('Teint de peau', SKIN, SKIN_NAMES, 'sk'), seg('Coiffure', STYLES, 'h'), sw('Couleur des cheveux', HAIR, HAIR_NAMES, 'hc'), seg('Barbe', BEARDS, 'bd'), sw('Couleur des yeux', EYES, EYE_NAMES, 'ey'),
+          seg('Haut', TOP_NAMES.slice(0, 1), 'tc'), sw('Couleur du haut', TOPS, TOP_NAMES.slice(1), 'tc', 1), sw('Pantalon', PANTS, PANT_NAMES, 'pc'), sw('Chaussures', SHOES, SHOE_NAMES, 'sc'), seg('Accessoire', ACCESSORIES, 'ac'),
+          h('div', { class: 'actions' }, btn('Aléatoire', () => { const r = (n) => Math.floor(Math.random() * (n + 1)); look = { s: look.s, h: r(7), hc: r(7), sk: r(7), ac: r(5), tc: r(8), pc: r(6), sc: r(5), ey: r(4), bd: look.s ? 0 : r(3) }; ctl.look.set(look); draw(); }), btn('Réinitialiser', () => { look = { s: look.s, h: 0, hc: 0, sk: 3, ac: 0, tc: 0, pc: 0, sc: 0, ey: 0, bd: 0 }; ctl.look.set(look); draw(); })),
           h('p', { class: 'sub wrap', text: 'Les changements sont visibles tout de suite et conservés. Les couleurs du haut viennent de votre profil JexChat.' }));
       }
       draw(); return root;

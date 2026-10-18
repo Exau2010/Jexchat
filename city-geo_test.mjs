@@ -75,5 +75,19 @@ for (const wp of path) {
 const finalD = Math.hypot(pos[0] - path[path.length - 1][0], pos[1] - path[path.length - 1][1]);
 ok(finalD < 1.5, `le personnage traverse le canal par le pont (distance restante ${finalD.toFixed(2)} m, ${steps} pas)`);
 ok(L.trees.length > 300, `arbres (${L.trees.length})`);
+
+// ─── monde ouvert : sortir de la ville vers les collines et les routes ───
+ok(G.isFree(L, 0, -300) && G.isFree(L, 150, -120), 'prairies et colline praticables hors de la ville');
+ok(!G.isFree(L, 0, 300) && !G.isFree(L, 0, G.WORLD.z1 + 50), 'le lac et l\'extérieur du monde ne sont pas praticables');
+let steep = 0, sampled = 0;
+for (let x = -400; x <= 400; x += 10) for (let z = -450; z <= 130; z += 10) { if (G.inTown(x, z)) continue; sampled++; if (G.slopeAt(x, z) >= 0.9 && G.isFree(L, x, z)) steep++; }
+ok(steep === 0, `aucune paroi (pente >= 0,9) n'est praticable (${sampled} points testés)`);
+for (const r of G.ROADS) ok(r.pts.every(([x, z]) => G.isFree(L, x, z)), `${r.name} : tous les points de passage sont praticables`);
+{ // marche réelle de la ville jusqu'au pied de la route du Château
+  const dest = G.ROADS[0].pts[1]; const pth = G.planPath(L, sp, dest); let ps = sp.slice(), n = 0, reached = false;
+  for (const wp of pth) for (let i = 0; i < 20000; i++) { const dx = wp[0] - ps[0], dz = wp[1] - ps[1], d = Math.hypot(dx, dz); if (d < 0.3) break; const sS = Math.min(0.1, d); ps = G.slideMove(L, ps[0], ps[1], ps[0] + dx / d * sS, ps[1] + dz / d * sS); n++; }
+  reached = Math.hypot(ps[0] - dest[0], ps[1] - dest[1]) < 3;
+  ok(reached, `marche de la ville vers la route du Château (arrivée à ${Math.hypot(ps[0] - dest[0], ps[1] - dest[1]).toFixed(1)} m, ${n} pas)`);
+}
 console.log(fails ? `\n${fails} échec(s)` : '\nTous les tests passent');
 process.exit(fails ? 1 : 0);

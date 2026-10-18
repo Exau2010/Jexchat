@@ -195,7 +195,25 @@ export function createWorld({ scene, layout, tier, renderer }) {
         tmp.setRGB(col[i * 3], col[i * 3 + 1], col[i * 3 + 2]).lerp(rock, t * 0.85); col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
       }
     }
-    const mesh = new THREE.Mesh(g, terrainMat); mesh.receiveShadow = true; root.add(mesh);
+    const mesh = new THREE.Mesh(g, terrainMat); mesh.receiveShadow = true; mesh.userData.pick = 'ground'; root.add(mesh); pickables.push(mesh); // le relief est praticable (clic = marche)
+  }
+
+  // ── Routes de campagne : rubans posés sur le relief (une géométrie par route, aucun calcul par image) ──
+  {
+    const W = 2.6, roadMat = plain({ color: '#77746c', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    for (const r of G.ROADS) {
+      const curve = new THREE.CatmullRomCurve3(r.pts.map(([x, z]) => new THREE.Vector3(x, 0, z)));
+      const n = Math.ceil(curve.getLength() / 4), pts = curve.getSpacedPoints(n), pos = [], idx = [];
+      for (let i = 0; i <= n; i++) {
+        const p = pts[i], q = pts[Math.min(n, i + 1)], o = pts[Math.max(0, i - 1)];
+        let tx = q.x - o.x, tz = q.z - o.z; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+        for (const sgn of [-1, 1]) { const x = p.x - tz * W * sgn, z = p.z + tx * W * sgn; pos.push(x, G.terrainHeight(x, z) + 0.14, z); }
+        if (i < n) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 2, a + 1, a + 3); }
+      }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+      const m = new THREE.Mesh(g, roadMat); m.receiveShadow = true; root.add(m);
+      landmarks.push({ name: r.name, pos: new THREE.Vector3(r.pts[2][0], 0, r.pts[2][1]) });
+    }
   }
 
   // ── Sol de la ville (quais pavés), murs du canal, pont, embarcadère ──

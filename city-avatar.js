@@ -4,6 +4,7 @@
 // aucun profil n'est copié, on lit celui de JexChat. Aucune ressource externe.
 import * as THREE from 'three';
 import { heightToNormal } from './city-textures.js';
+import { SKIN as SKINS, HAIR as HAIRS, cleanLook } from './city-look.js';
 
 const SKIN = '#c98f6b', HAIR = '#1d1612', JEANS = '#27324a', SOLE = '#ece8df';
 const matCache = new Map();
@@ -31,7 +32,7 @@ function nameSprite(text) {
   ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 128, 33);
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  sp.scale.set(2.2, 0.55, 1); sp.position.y = 2.12; sp.renderOrder = 5;
+  sp.scale.set(2.4, 0.6, 1); sp.position.y = 2.12; sp.renderOrder = 5;
   return sp;
 }
 
@@ -44,23 +45,27 @@ function ball(r, material, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, seg = 16
   const m = new THREE.Mesh(new THREE.SphereGeometry(r, seg, Math.round(seg * 0.75)), material); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.castShadow = true; return m;
 }
 
-export function createAvatar({ colorA, colorB, name = '' } = {}) {
+export function createAvatar({ colorA, colorB, name = '', look } = {}) {
+  const L = cleanLook(look), fem = L.s === 1;
   const A = safeColor(colorA, '#3b4256'), B = safeColor(colorB, '#e8c882');
-  const top = mat(A, 0.9, true), trim = mat(B, 0.7), skin = mat(SKIN, 0.55), hair = mat(HAIR, 0.5), jeans = mat(JEANS, 0.9, true), sole = mat(SOLE, 0.7), shoe = mat('#d9d6cf', 0.75);
-  const eyeW = mat('#f4f1ec', 0.3), iris = mat('#1a1410', 0.2), lipM = mat('#9a5a4c', 0.5);
+  const top = mat(A, 0.9, true), trim = mat(B, 0.7), skin = mat(SKINS[L.sk] || SKIN, 0.55), hair = mat(HAIRS[L.hc] || HAIR, 0.5), jeans = mat(JEANS, 0.9, true), sole = mat(SOLE, 0.7), shoe = mat('#d9d6cf', 0.75);
+  const eyeW = mat('#f4f1ec', 0.3), iris = mat('#1a1410', 0.2), lipM = mat(fem ? '#b5545c' : '#9a5a4c', 0.5);
+  const dark = mat('#1b1b22', 0.4);
 
   const group = new THREE.Group();
   const body = new THREE.Group(); group.add(body);
+  if (fem) body.scale.set(0.97, 0.96, 0.97); // silhouette un peu plus fine et plus petite
 
   // bassin
   const pelvis = new THREE.Group(); pelvis.position.y = 0.93; body.add(pelvis);
-  pelvis.add(ball(0.155, jeans, 0, 0, 0, 1.15, 0.78, 0.85));
+  pelvis.add(ball(0.155, jeans, 0, 0, 0, fem ? 1.32 : 1.15, 0.78, 0.9));
 
   // torse (pivot à la taille)
   const spine = new THREE.Group(); spine.position.y = 0.05; pelvis.add(spine);
-  const chest = ball(0.19, top, 0, 0.24, 0, 1.18, 1.45, 0.78, 20); spine.add(chest);
+  const chest = ball(0.19, top, 0, 0.24, 0, fem ? 1.0 : 1.18, 1.45, fem ? 0.82 : 0.78, 20); spine.add(chest);
+  if (fem) { spine.add(ball(0.17, top, 0, 0.1, 0, 1.0, 0.8, 0.82, 14)); }
   spine.add(ball(0.165, top, 0, 0.07, 0, 1.12, 0.9, 0.78, 16)); // ventre / bas de veste
-  spine.add(ball(0.2, top, 0, 0.4, 0, 1.2, 0.5, 0.75, 16));      // épaules
+  spine.add(ball(0.2, top, 0, 0.4, 0, fem ? 1.02 : 1.2, 0.5, 0.75, 16));      // épaules
   const hem = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.014, 6, 24), trim); hem.rotation.x = Math.PI / 2; hem.position.set(0, -0.02, 0); hem.scale.set(1.1, 0.8, 1); spine.add(hem);
   const hood = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.034, 8, 18), top); hood.rotation.x = Math.PI / 2.4; hood.position.set(0, 0.5, -0.03); hood.castShadow = true; spine.add(hood);
 
@@ -69,9 +74,18 @@ export function createAvatar({ colorA, colorB, name = '' } = {}) {
   const headP = new THREE.Group(); headP.position.y = 0.56; spine.add(headP);
   const cranium = ball(0.112, skin, 0, 0.1, 0, 0.93, 1.07, 1.0, 24); headP.add(cranium);
   headP.add(ball(0.074, skin, 0, 0.035, 0.038, 0.95, 0.9, 0.95, 18));        // menton / mâchoire
-  const hairCap = ball(0.119, hair, 0, 0.118, -0.006, 0.95, 1.0, 1.02, 24);
-  hairCap.geometry.dispose(); hairCap.geometry = new THREE.SphereGeometry(0.119, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.56); headP.add(hairCap);
-  headP.add(ball(0.095, hair, 0, 0.115, -0.04, 1, 0.8, 1, 14));              // nuque
+  // Coiffures (matériau unique : léger) — 0 courts, 1 longs, 2 queue de cheval, 3 bouclés, 4 rasés, 5 chauve
+  const cap = (r, cover) => { const m = ball(r, hair, 0, 0.118, -0.006, 0.95, 1.0, 1.02, 24); m.geometry.dispose(); m.geometry = new THREE.SphereGeometry(r, 24, 14, 0, Math.PI * 2, 0, Math.PI * cover); return m; };
+  if (L.h !== 5) {
+    headP.add(cap(L.h === 4 ? 0.1165 : 0.119, L.h === 4 ? 0.4 : 0.56));
+    if (L.h !== 4) headP.add(ball(0.095, hair, 0, 0.115, -0.04, 1, 0.8, 1, 14)); // nuque
+    if (L.h === 1) { const back = limb(0.3, 0.07, hair, 1.25, 0.7); back.position.set(0, 0.1, -0.085); headP.add(back); for (const sx of [-1, 1]) { const side = limb(0.2, 0.026, hair); side.position.set(sx * 0.1, 0.1, -0.02); headP.add(side); } }
+    if (L.h === 2) { headP.add(ball(0.03, hair, 0, 0.17, -0.12, 1, 1, 1, 10)); const tail = limb(0.22, 0.028, hair); tail.position.set(0, 0.15, -0.14); tail.rotation.x = -0.35; headP.add(tail); }
+    if (L.h === 3) for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2; headP.add(ball(0.04, hair, Math.sin(a) * 0.095, 0.17 + (i % 2) * 0.03, Math.cos(a) * 0.09 - 0.02, 1, 1, 1, 8)); }
+  }
+  if (L.ac === 1) { for (const sx of [-1, 1]) { const g = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.004, 6, 16), dark); g.position.set(sx * 0.04, 0.105, 0.108); headP.add(g); } const br = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.004, 0.004), dark); br.position.set(0, 0.108, 0.11); headP.add(br); }
+  if (L.ac === 2) { const c = ball(0.124, trim, 0, 0.124, -0.004, 0.95, 1, 1.02, 20); c.geometry.dispose(); c.geometry = new THREE.SphereGeometry(0.124, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5); headP.add(c); const v = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.008, 0.08), trim); v.position.set(0, 0.138, 0.13); v.rotation.x = 0.12; headP.add(v); }
+  if (L.ac === 3) { const b = new THREE.Mesh(new THREE.TorusGeometry(0.108, 0.012, 6, 24), trim); b.rotation.x = Math.PI / 2; b.position.y = 0.15; b.scale.set(0.95, 1, 1.02); headP.add(b); }
   for (const s of [-1, 1]) {
     headP.add(ball(0.019, skin, s * 0.107, 0.085, 0, 0.5, 1.2, 1, 8));       // oreilles
     headP.add(ball(0.0155, eyeW, s * 0.04, 0.105, 0.098, 1, 0.8, 0.6, 10));  // yeux
@@ -83,7 +97,7 @@ export function createAvatar({ colorA, colorB, name = '' } = {}) {
 
   // bras : épaule → coude → main
   function arm(s) {
-    const sh = new THREE.Group(); sh.position.set(s * 0.215, 0.4, 0); spine.add(sh);
+    const sh = new THREE.Group(); sh.position.set(s * (fem ? 0.188 : 0.215), 0.4, 0); spine.add(sh);
     sh.add(ball(0.052, top, 0, 0, 0, 1, 1, 1, 12));
     sh.add(limb(0.27, 0.047, top));
     const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);

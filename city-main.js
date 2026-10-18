@@ -7,7 +7,10 @@ import { createControls } from './city-controls.js';
 import { createAvatar } from './city-avatar.js';
 import { createSocial } from './city-social.js';
 import { createPosts } from './city-posts.js';
-import { createUI } from './city-ui.js';
+import { createUI, h } from './city-ui.js';
+import { createGamesClient } from './city-games.js';
+import { cleanLook, loadLocalLook, saveLocalLook } from './city-look.js';
+import { disposeAvatar } from './city-social.js';
 import { api } from './city-api.js';
 
 const $ = (s) => document.querySelector(s);
@@ -78,8 +81,17 @@ async function boot() {
   const saved = (() => { try { return JSON.parse(sessionStorage.getItem('jexcity.pos')); } catch (_) { return null; } })();
   const sp = saved && G.isFree(layout, saved.x, saved.z) ? [saved.x, saved.z] : G.spawnPoint();
   const player = { x: sp[0], z: sp[1], path: [], speed: 4.2, stuck: 0, dest: null };
-  const av = createAvatar({ colorA: me.identity?.colorA, colorB: me.identity?.colorB, name: me.username });
+  // Apparence : celle du serveur (partagée avec les autres joueurs), sinon la copie locale de cet appareil.
+  let look = cleanLook(config.look && Object.keys(config.look).length ? config.look : loadLocalLook());
+  let av = createAvatar({ colorA: me.identity?.colorA, colorB: me.identity?.colorB, name: me.username, look });
   scene.add(av.group);
+  let lookT = 0;
+  const setLook = (next) => { // visible tout de suite ; conservé sur l'appareil puis sur le serveur (un seul envoi après 0,6 s sans changement)
+    look = cleanLook(next); saveLocalLook(look);
+    const old = av.group, yaw = old.rotation.y; scene.remove(old); disposeAvatar(old);
+    av = createAvatar({ colorA: me.identity?.colorA, colorB: me.identity?.colorB, name: me.username, look }); av.group.rotation.y = yaw; scene.add(av.group);
+    clearTimeout(lookT); lookT = setTimeout(() => api.saveLook(look).catch(() => ui?.toast('Apparence non enregistrée sur le serveur.')), 600);
+  };
   const posV = new THREE.Vector3(player.x, G.groundY(player.x, player.z), player.z);
   const marker = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.5, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xf0b463, transparent: true, opacity: 0, depthWrite: false }));
   scene.add(marker);
@@ -87,9 +99,9 @@ async function boot() {
   const socket = window.io ? window.io({ transports: ['websocket', 'polling'] }) : null;
   if (!socket) return fatal('Connexion temps réel indisponible.');
   const social = createSocial({ scene, layout, pickables, socket, getSelf: () => player });
-  const posts = createPosts({ world, pickables });
+  const posts = createPosts({ world, pickables, layout });
 
-  let ui; let mood = '';
+  let ui, games; let mood = '';
   const walkTo = (x, z) => {
     const path = G.planPath(layout, [player.x, player.z], [x, z]);
     if (!path.length) return;
@@ -105,6 +117,7 @@ async function boot() {
       const kind = hit.object.userData.pick;
       if (kind === 'avatar') { const r = social.remotes.get(hit.object.userData.userId); if (r) ui.showUser({ ...r.user, id: r.id }); }
       else if (kind === 'boat') { const p = posts.select(hit.object.userData.index); if (p) ui.showPost(p, () => posts.release()); }
+      else if (kind === 'board') { const p = posts.selectBoard(hit.object.userData.index); if (p) ui.showPost(p); }
       else walkTo(hit.point.x, hit.point.z); // façade : on rejoint le point libre le plus proche
     },
   });
@@ -114,6 +127,8 @@ async function boot() {
     me, socket,
     ctl: {
       muted: config.muted, layout, walkTo,
+      games: { invite: (id, name) => games.invite(id, name) },
+      look: { get: () => look, set: setLook },
       remote: (id) => social.remotes.get(id), remotes: () => [...social.remotes.values()], self: () => player, landmarks: () => world.landmarks,
       removeRemote: (id) => social.remove(id),
       getMood: () => mood, setMood: (t) => { mood = (t || '').trim().slice(0, 40); social.setMood(mood); ui.setMoodLabel(mood); },
@@ -122,6 +137,7 @@ async function boot() {
       setLight: (on) => { if (on) { localStorage.setItem('jexcity.tier', 'low'); setTier(TIERS.low); } else { localStorage.removeItem('jexcity.tier'); const d = detectTier(); setTier(d.name === 'low' ? TIERS.mid : d); } },
     },
   });
+  games = createGamesClient({ socket, me, h, toast: (m) => ui.toast(m) });
   function setTier(t) { tier = t; world.setTier(t); applySize(); }
 
   // Heure réelle de l'utilisateur (modifiable dans les réglages)
@@ -131,7 +147,7 @@ async function boot() {
   social.onError = (m) => ui.toast(m);
   const connectJoin = () => social.join(mood);
   if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
-  const loadPosts = () => api.latestPosts(world.boats.length).then((p) => posts.assign(p)).catch(() => {});
+  const loadPosts = () => api.latestPosts(Math.min(30, posts.capacity)).then((p) => posts.assign(p)).catch(() => {});
   loadPosts(); setInterval(() => { if (!ui.isOpen() && !document.hidden) loadPosts(); }, 180000);
 
   // 5) Boucle
@@ -155,7 +171,7 @@ async function boot() {
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);
     world.followShadow(posV); world.update(t, dt, camera.position);
-    social.update(dt, t, camera.position); posts.update(camera.position);
+    social.update(dt, t, camera.position); posts.update(camera.position, t);
     renderer.render(scene, camera);
     // sauvegarde de position (reprise après perte de contexte) + qualité adaptative
     saveT += dt; if (saveT > 2) { saveT = 0; try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} }

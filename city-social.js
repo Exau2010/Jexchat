@@ -28,6 +28,10 @@ function moodSprite(text) {
   return sp;
 }
 function disposeSprite(sp) { sp.material.map?.dispose(); sp.material.dispose(); }
+// Libère la mémoire GPU d'un avatar retiré (géométries et étiquettes) ; la capsule de sélection est partagée, on n'y touche pas.
+export function disposeAvatar(group) {
+  group.traverse((o) => { if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } else if (o.geometry && o.geometry !== hitGeo) o.geometry.dispose(); });
+}
 
 export function createSocial({ scene, layout, pickables, socket, getSelf }) {
   const remotes = new Map(); // id -> { id, user, av, hit, mood, x, z, path }
@@ -40,12 +44,12 @@ export function createSocial({ scene, layout, pickables, socket, getSelf }) {
   }
   function add(u) {
     if (!u || remotes.has(u.id)) return;
-    const av = createAvatar({ colorA: u.identity?.colorA, colorB: u.identity?.colorB, name: u.username });
+    const av = createAvatar({ colorA: u.identity?.colorA, colorB: u.identity?.colorB, name: u.username, look: u.look });
     const hit = new THREE.Mesh(hitGeo, hitMat); hit.position.y = 1.05; hit.userData = { pick: 'avatar', userId: u.id };
     av.group.add(hit); pickables.push(hit);
     const x = Number.isFinite(u.x) ? u.x : 0, z = Number.isFinite(u.z) ? u.z : 0;
     av.group.position.set(x, G.groundY(x, z), z); scene.add(av.group);
-    const r = { id: u.id, user: { id: u.id, username: u.username, identity: u.identity, avatarUrl: u.avatarUrl, mood: '' }, av, hit, x, z, path: [], moodSp: null };
+    const r = { id: u.id, user: { id: u.id, username: u.username, identity: u.identity, avatarUrl: u.avatarUrl, look: u.look, mood: '' }, av, hit, x, z, path: [], moodSp: null };
     setMood(r, u.mood); remotes.set(u.id, r);
     if (Number.isFinite(u.tx) && (Math.abs(u.tx - x) > 0.5 || Math.abs(u.tz - z) > 0.5)) r.path = G.planPath(layout, [x, z], [u.tx, u.tz]);
   }
@@ -53,8 +57,7 @@ export function createSocial({ scene, layout, pickables, socket, getSelf }) {
     const r = remotes.get(id); if (!r) return;
     scene.remove(r.av.group);
     const i = pickables.indexOf(r.hit); if (i >= 0) pickables.splice(i, 1);
-    if (r.moodSp) disposeSprite(r.moodSp);
-    r.av.group.traverse((o) => { if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } });
+    disposeAvatar(r.av.group); // inclut l'étiquette d'humeur (enfant du groupe)
     remotes.delete(id);
   }
   function clear() { for (const id of [...remotes.keys()]) remove(id); }
@@ -65,6 +68,16 @@ export function createSocial({ scene, layout, pickables, socket, getSelf }) {
     const r = remotes.get(id); if (!r) return;
     if (Math.hypot(r.x - x, r.z - z) > 8) { r.x = x; r.z = z; } // trop d'écart : on recale
     r.path = G.planPath(layout, [r.x, r.z], [tx, tz]);
+  });
+  // Apparence modifiée par un joueur : on reconstruit son avatar à la même place (rare, donc sans coût au quotidien).
+  socket.on('city:look', ({ id, look }) => {
+    const r = remotes.get(id); if (!r) return;
+    const old = r.av.group, pos = old.position.clone(), yaw = old.rotation.y, mood = r.user.mood;
+    scene.remove(old); const i = pickables.indexOf(r.hit); if (i >= 0) pickables.splice(i, 1); disposeAvatar(old);
+    r.user.look = look; r.moodSp = null;
+    r.av = createAvatar({ colorA: r.user.identity?.colorA, colorB: r.user.identity?.colorB, name: r.user.username, look });
+    r.hit = new THREE.Mesh(hitGeo, hitMat); r.hit.position.y = 1.05; r.hit.userData = { pick: 'avatar', userId: id }; r.av.group.add(r.hit); pickables.push(r.hit);
+    r.av.group.position.copy(pos); r.av.group.rotation.y = yaw; scene.add(r.av.group); setMood(r, mood);
   });
   socket.on('city:mood', ({ id, mood }) => { const r = remotes.get(id); if (r) setMood(r, mood); });
 

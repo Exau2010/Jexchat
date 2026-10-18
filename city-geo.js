@@ -64,6 +64,19 @@ export function terrainHeight(x, z) {
   return lerp(h, TOWN.quayY, w);
 }
 
+// Monde explorable : la ville + les collines, routes et prairies alentour (le terrain visible va au-delà ; on borne la marche).
+export const WORLD = { x0: -420, x1: 420, z0: -460, z1: 140 };
+export const inWorld = (x, z) => x >= WORLD.x0 && x <= WORLD.x1 && z >= WORLD.z0 && z <= WORLD.z1;
+// Pente locale (rapport dénivelé / distance) : au-delà de ~0,9 le versant est une paroi, on ne le gravit pas.
+export function slopeAt(x, z) {
+  const e = 1.5, gx = (terrainHeight(x + e, z) - terrainHeight(x - e, z)) / (2 * e), gz = (terrainHeight(x, z + e) - terrainHeight(x, z - e)) / (2 * e);
+  return Math.hypot(gx, gz);
+}
+// Routes : deux routes de campagne qui partent de la ville et serpentent dans les collines (rubans plats, repérés par la carte).
+export const ROADS = [
+  { name: 'Route du Château', pts: [[64, -60], [110, -90], [150, -120], [190, -150], [230, -190], [270, -250], [300, -330]] },
+  { name: 'Route des Crêtes', pts: [[-64, -120], [-110, -170], [-170, -210], [-240, -260], [-300, -340], [-330, -420]] },
+];
 export const inTown = (x, z) => x >= TOWN.x0 && x <= TOWN.x1 && z >= TOWN.z0 && z <= TOWN.z1;
 
 // Hauteur du tablier d'un pont en (x,z), ou null. Le tablier est cambré (point haut au centre du canal).
@@ -164,7 +177,11 @@ export function circleHitsRect(x, z, r, q) {
   return Math.abs(lx) < q.hx + r && Math.abs(lz) < q.hz + r;
 }
 export function isFree(layout, x, z, r = 0.45) {
-  if (x < TOWN.x0 + 1 || x > TOWN.x1 - 1 || z < TOWN.z0 + 1 || z > TOWN.z1 - 1) return false;
+  if (!inWorld(x, z)) return false;
+  if (!inTown(x, z)) { // hors de la ville : prairies, collines, routes — ni lac, ni parois
+    if (z > TOWN.z1 - 6 && Math.abs(x) < 40) return terrainHeight(x, z) > 0.4 && slopeAt(x, z) < 0.9 && z < TOWN.z1 + 2; // berge du lac
+    return terrainHeight(x, z) > 0.4 && slopeAt(x, z) < 0.9;
+  }
   if (blockedByCanal(x, z)) return false;
   for (const q of layout.rects) if (circleHitsRect(x, z, r, q)) return false;
   return true;
@@ -177,7 +194,7 @@ export function slideMove(layout, px, pz, nx, nz, r = 0.45) {
 }
 // Ramène un point cliqué vers le point libre le plus proche (hors bâtiment, hors eau).
 export function freePoint(layout, x, z, r = 0.5) {
-  x = clamp(x, TOWN.x0 + 1.5, TOWN.x1 - 1.5); z = clamp(z, TOWN.z0 + 1.5, TOWN.z1 - 1.5);
+  x = clamp(x, WORLD.x0 + 1.5, WORLD.x1 - 1.5); z = clamp(z, WORLD.z0 + 1.5, WORLD.z1 - 1.5);
   for (let it = 0; it < 6; it++) {
     if (isFree(layout, x, z, r)) return [x, z];
     if (blockedByCanal(x, z)) { const a = x - canalX(z); x = canalX(z) + (a >= 0 ? 1 : -1) * (halfW(z) + 0.8); continue; }
@@ -211,7 +228,7 @@ export function planPath(layout, from, to) {
   to = freePoint(layout, to[0], to[1]);
   const sa = Math.sign(from[0] - canalX(from[1])), sb = Math.sign(to[0] - canalX(to[1]));
   const pts = [];
-  if (sa !== 0 && sb !== 0 && sa !== sb) {
+  if (inTown(from[0], from[1]) && inTown(to[0], to[1]) && sa !== 0 && sb !== 0 && sa !== sb) {
     let best = BRIDGES[0], bs = Infinity;
     for (const b of BRIDGES) { const s = Math.abs(from[1] - b.z) + Math.abs(to[1] - b.z); if (s < bs) { bs = s; best = b; } }
     const f = frame(best.z), off = halfW(best.z) + 2;

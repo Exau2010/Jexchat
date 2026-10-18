@@ -29,10 +29,11 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').sli
 export const api = {
   me: () => call('/api/auth/me'),
   config: () => call('/api/city/config'),
-  search: (text) => call(`/api/users/search?q=${q(text)}`),
+  search: (text) => call(`/api/city/search?q=${q(text)}`), // même résultats que JexChat, sans les utilisateurs bloqués (dans les deux sens)
   user: (id) => call(`/api/users/${q(id)}`),
   latestPosts: (limit = 7) => call(`/api/posts?limit=${limit}`),
   postsOf: (id) => call(`/api/posts/user/${q(id)}?limit=10`),
+  post: (id) => call(`/api/posts/${q(id)}`),
   like: (id) => call(`/api/posts/${q(id)}/like`, { method: 'POST' }),
   conversations: () => call('/api/conversations?limit=30'),
   messages: (id) => call(`/api/conversations/${q(id)}/messages?limit=30`),
@@ -42,11 +43,16 @@ export const api = {
   invite: (userId) => call('/api/city/invite', { method: 'POST', body: { userId } }),
   mute: (id) => call(`/api/city/mute/${q(id)}`, { method: 'POST' }),
   unmute: (id) => call(`/api/city/mute/${q(id)}`, { method: 'DELETE' }),
-  block: (id) => call(`/api/users/block/${q(id)}`, { method: 'POST' }),
+  block: (id) => call(`/api/users/block/${q(id)}`, { method: 'POST' }).then((r) => api.hideRefresh(id).then(() => r)),
+  unblock: (id) => call(`/api/users/unblock/${q(id)}`, { method: 'POST' }).then((r) => api.hideRefresh(id).then(() => r)),
+  blockedList: () => call('/api/users/blocked/list'),
+  hideRefresh: (id) => call(`/api/city/hide-refresh/${q(id)}`, { method: 'POST' }).catch(() => {}), // met la présence à jour tout de suite
+  saveLook: (look) => call('/api/city/look', { method: 'PUT', body: look }),
   report: (targetType, targetId, reason) => call('/api/reports', { method: 'POST', body: { targetType, targetId, reason } }),
+  readAllNotifications: () => call('/api/notifications/read-all', { method: 'POST' }),
   notifCount: () => call('/api/notifications/count'),
   notifications: () => call('/api/notifications'),
-  readNotification: (id) => call(`/api/notifications/${q(id)}/read`, { method: 'POST' }).catch(() => {}),
+  readNotification: (id) => call(`/api/notifications/${q(id)}/read`, { method: 'POST' }), // renvoie { ok, count } ; l'erreur est gérée par l'appelant
 };
 
 // Texte d'une publication, partagée ou non (le contenu partagé est celui de l'original).

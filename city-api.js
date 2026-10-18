@@ -1,14 +1,20 @@
 // city-api.js — JexCity : communications avec l'API JexChat existante (même origine, cookie de session HttpOnly).
 // Aucune donnée n'est copiée : on lit et on écrit via les routes déjà en place (+ /api/city/* pour l'invitation et la sourdine).
 
+// Requêtes déjà lancées par city.html au démarrage : utilisées une seule fois, puis oubliées.
+const early = (typeof window !== 'undefined' && window.__jexEarly) || {};
+
 async function call(url, { method = 'GET', body } = {}) {
   let r;
   try {
-    r = await fetch(url, {
+    const init = {
       method, credentials: 'same-origin',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
-    });
+    };
+    const pre = method === 'GET' && !body && early[url];
+    if (pre) delete early[url];
+    r = pre ? await pre.catch(() => fetch(url, init)) : await fetch(url, init);
   } catch (_) {
     const e = new Error('Connexion impossible. Vérifiez votre réseau.'); e.offline = true; throw e;
   }

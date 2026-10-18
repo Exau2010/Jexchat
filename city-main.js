@@ -33,13 +33,14 @@ function pickTier() { const saved = localStorage.getItem('jexcity.tier'); return
 
 async function boot() {
   // 1) Session JexChat existante (cookie HttpOnly, même origine). Sinon : retour à la connexion.
-  let me;
-  try { me = await api.me(); } catch (e) {
+  // Les appels réseau sont déjà partis (city.html) : ils avancent pendant que la ville se construit ci-dessous.
+  let meErr = null;
+  const meP = api.me(); meP.catch((e) => { meErr = e; });
+  const configP = api.config().catch(() => ({ muted: [] })); // sourdine indisponible : non bloquant
+  const failMe = (e) => {
     if (e.status === 401) { $('#fatal-home').textContent = 'Se connecter à JexChat'; return fatal('Connectez-vous à JexChat pour entrer dans JexCity.', false); }
     return fatal(e.message);
-  }
-  me.id = String(me.id);
-  let config = { muted: [] }; try { config = await api.config(); } catch (_) { /* sourdine indisponible : non bloquant */ }
+  };
 
   // 2) Rendu
   let tier = pickTier();
@@ -62,10 +63,16 @@ async function boot() {
   // 3) Monde
   $('#ld-msg').textContent = 'Construction de la ville…';
   await new Promise((r) => setTimeout(r, 30)); // laisse le navigateur afficher le message
+  if (meErr) return failMe(meErr); // non connecté : inutile de construire la ville
   const layout = G.buildLayout(7);
   let world;
   try { world = createWorld({ scene, layout, tier, renderer }); } catch (e) { console.error(e); return fatal('Impossible de construire la ville : ' + e.message); }
   const pickables = world.pickables;
+
+  // Session et réglages : normalement déjà arrivés pendant la construction.
+  let me; try { me = await meP; } catch (e) { return failMe(e); }
+  me.id = String(me.id);
+  const config = await configP;
 
   // 4) Joueur (position restaurée après une perte de contexte)
   const saved = (() => { try { return JSON.parse(sessionStorage.getItem('jexcity.pos')); } catch (_) { return null; } })();

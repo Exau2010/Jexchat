@@ -9,6 +9,23 @@
 <link rel="stylesheet" href="/city.css">
 <!-- Three.js r160 (MIT) : copie locale à la racine (aucun CDN). Les add-ons (GLTFLoader, BufferGeometryUtils) sont aussi à la racine. -->
 <script type="importmap">{"imports":{"three":"/three.module.min.js","three/addons/":"/"}}</script>
+<!-- Chargement en parallèle : tous les modules sont demandés dès l'ouverture (au lieu d'une cascade module → import → import). -->
+<link rel="modulepreload" href="/three.module.min.js">
+<link rel="modulepreload" href="/city-main.js">
+<link rel="modulepreload" href="/city-geo.js">
+<link rel="modulepreload" href="/city-world.js">
+<link rel="modulepreload" href="/city-textures.js">
+<link rel="modulepreload" href="/city-controls.js">
+<link rel="modulepreload" href="/city-avatar.js">
+<link rel="modulepreload" href="/city-social.js">
+<link rel="modulepreload" href="/city-posts.js">
+<link rel="modulepreload" href="/city-ui.js">
+<link rel="modulepreload" href="/city-api.js">
+<script defer src="/socket.io/socket.io.js"></script>
+<script>
+// Les deux appels de démarrage partent tout de suite, pendant le téléchargement des modules (city-api.js les réutilise une seule fois).
+(function () { var e = window.__jexEarly = {}; try { ['/api/auth/me', '/api/city/config'].forEach(function (u) { e[u] = fetch(u, { credentials: 'same-origin' }); e[u].catch(function () {}); }); } catch (_) {} })();
+</script>
 </head>
 <body>
 <canvas id="gl" tabindex="0" aria-label="Ville 3D JexCity"></canvas>
@@ -36,7 +53,6 @@
 <div id="loader"><div class="ld-title">JexCity</div><div class="ld-sub" id="ld-msg">Chargement de la ville…</div><div class="ld-bar"><i></i></div></div>
 <div id="fatal" hidden><div class="ld-title">JexCity</div><div class="ld-sub" id="fatal-msg"></div><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center"><button class="btn primary" id="fatal-retry">Réessayer</button><a class="btn" id="fatal-home" href="/">Retour à JexChat</a></div></div>
 
-<script src="/socket.io/socket.io.js"></script>
 <script type="module" src="/city-main.js"></script>
 </body>
 </html>

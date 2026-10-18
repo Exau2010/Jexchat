@@ -62,22 +62,77 @@ const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUti
 // Ressources 3D locales de JexCity (modèles GLB, textures) : noms simples uniquement, pas de sous-dossier.
 const ASSET_RE = /^[a-z0-9_-]+\.(glb|jpg|png|webp)$/i;
 
+// Compression gzip/brotli faite ici, en mémoire, pour les seuls fichiers JexCity (aucune dépendance ajoutée,
+// aucun changement dans server.js). Recalculée automatiquement si le fichier change sur le disque.
+const zlib = require('zlib');
+const crypto = require('crypto');
+const fsp = require('fs').promises;
+const { promisify } = require('util');
+const gzipAsync = promisify(zlib.gzip), brotliAsync = promisify(zlib.brotliCompress);
+const MIME = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8' };
+const _packed = new Map();
+
+function packed(file) { // → Promise<{ raw, gz, br, etag, type }>
+  const full = path.join(CITY_DIR, file);
+  return fsp.stat(full).then((st) => {
+    const key = st.mtimeMs + ':' + st.size, hit = _packed.get(file);
+    if (hit && hit.key === key) return hit.p;
+    const p = (async () => {
+      const raw = await fsp.readFile(full);
+      const [gz, br] = await Promise.all([
+        gzipAsync(raw, { level: 9 }),
+        brotliAsync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
+      ]);
+      return { raw, gz, br, etag: crypto.createHash('sha1').update(raw).digest('base64url').slice(0, 20), type: MIME[path.extname(file)] || 'application/octet-stream' };
+    })();
+    _packed.set(file, { key, p });
+    p.catch(() => { if (_packed.get(file) && _packed.get(file).p === p) _packed.delete(file); });
+    return p;
+  });
+}
+const etagMatches = (header, etag) => typeof header === 'string' && header.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
+
+// Envoie un fichier compressé (br > gzip > brut) avec ETag ; en cas de problème, retombe sur l'envoi classique.
+function sendPacked(req, res, file, cacheControl) {
+  packed(file).then((e) => {
+    const ae = String(req.headers['accept-encoding'] || '');
+    const enc = /\bbr\b/.test(ae) ? 'br' : /\bgzip\b/.test(ae) ? 'gzip' : '';
+    const body = enc === 'br' ? e.br : enc === 'gzip' ? e.gz : e.raw;
+    const etag = '"' + e.etag + (enc ? '-' + enc : '') + '"';
+    res.setHeader('Vary', 'Accept-Encoding');
+    res.setHeader('Cache-Control', cacheControl);
+    res.setHeader('ETag', etag);
+    if (etagMatches(req.headers['if-none-match'], etag)) return res.status(304).end();
+    res.setHeader('Content-Type', e.type);
+    if (enc) res.setHeader('Content-Encoding', enc);
+    res.setHeader('Content-Length', body.length);
+    res.end(body);
+  }).catch(() => {
+    if (res.headersSent) return;
+    res.setHeader('Cache-Control', cacheControl);
+    res.sendFile(path.join(CITY_DIR, file), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  });
+}
+
 function mountStatic(app) {
-  const noCache = (res) => res.setHeader('Cache-Control', 'no-cache');
+  const REVALIDATE = 'no-cache';                 // fichiers JexCity : ETag → 304 très légère, jamais de version périmée
+  const VENDOR_CACHE = 'public, max-age=604800'; // Three.js r160 (version figée) : 7 jours
   for (const f of VENDOR_FILES) {
-    app.get('/' + f, (req, res) => { res.setHeader('Cache-Control', 'public, max-age=86400'); res.sendFile(path.join(CITY_DIR, f)); });
+    app.get('/' + f, (req, res) => sendPacked(req, res, f, VENDOR_CACHE));
   }
   app.get('/city-assets/:name', (req, res) => {
     if (!ASSET_RE.test(req.params.name)) return res.status(404).end();
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.sendFile(path.join(CITY_DIR, 'city-assets', req.params.name), (err) => { if (err && !res.headersSent) res.status(404).end(); });
   });
-  const page = (req, res) => { noCache(res); res.sendFile(path.join(CITY_DIR, 'city.html')); };
+  const page = (req, res) => sendPacked(req, res, 'city.html', REVALIDATE);
   app.get('/city', page);
   app.get('/city/', page);
   for (const f of CITY_FILES) {
-    app.get('/' + f, (req, res) => { noCache(res); res.sendFile(path.join(CITY_DIR, f)); });
+    app.get('/' + f, (req, res) => sendPacked(req, res, f, REVALIDATE));
   }
+  // Préparation au démarrage du serveur : le premier visiteur n'attend pas la compression.
+  setImmediate(() => { for (const f of ['city.html', 'three.module.min.js', ...CITY_FILES]) packed(f).catch(() => {}); });
 }
 
 // ─── Présence (en mémoire) ────────────────────────────────────────────────────

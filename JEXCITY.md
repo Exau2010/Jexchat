@@ -55,25 +55,3 @@ Nouvelles routes : `GET /api/city/search`, `POST /api/city/hide-refresh/:id`, `P
 **Jeux d'action** (course 2 tours, tir arcade 3 vies / 60 s / 5 points) : vue de dessus en canvas, positions annoncées à ~10/s puis bornées par le serveur, touches et chrono décidés par le serveur, rien en base. **Limites** : navigateur intégré = YouTube/Vimeo seulement (CSP + protections des sites), autres sites ouverts à côté ; pas de chargement par zones (visibilité par distance, textures des panneaux à la demande) ; non vérifié sur vrai téléphone, vraie base MongoDB, vrai Socket.IO.
 
 **Lot 5** : personnalisation étendue (haut, pantalon, chaussures, yeux, barbe, 8 coiffures, 6 accessoires, aléatoire/réinitialiser ; indices validés côté serveur) et jeux solo dans `city-solo.js` (morpion contre l'ordinateur 3 niveaux, contre-la-montre, cibles ; aucun réseau, records dans localStorage `jexcity.best.*`).
-
-
-## Modèles 3D (GLB) — décor sans ralentissement
-
-- **city-props.glb** (250 Ko, 48 Ko compressé par le serveur) : camions, moto, 2 arbres, arche, pièce — extraits des kits Kenney (GitHub KenneyNL/Starter-Kit-*, licence MIT). Les couleurs sont dans les sommets : **aucune texture**, un matériau partagé, flat shading.
-- **city-props.js** : chargé *après* l'affichage de la ville (2,5 s + navigateur au repos). Moins de 10 appels de dessin ; ≈ 80 µs par image.
-  - 2 à 5 véhicules roulent sur les routes de campagne (à droite, ils s'arrêtent si vous êtes sur la route).
-  - Arbres le long des routes (instances ; 0 en qualité basse, 50 moyenne, 90 haute) et arches de départ.
-  - 28 pièces cachées (quais, routes, château, lac, collines), renouvelées chaque jour, mémorisées sur l'appareil (aucun envoi au serveur).
-- **city-sprites.js** : vues du dessus des véhicules pour la course (chargé seulement à l'ouverture de la course ; choix du véhicule mémorisé).
-- Test : `node city-props_test.mjs` (sans dépendance).
-- Pour ajouter d'autres modèles : les reconvertir dans city-props.glb (sommets colorés, pas de texture) plutôt que d'ajouter des GLB texturés ; garder l'avant du véhicule vers +Z.
-
-
-## Rendu plus réaliste : vraies textures photo + voiture PBR (sans ralentissement)
-
-- **city-surfaces.js** (chargé après l'affichage, navigateur au repos) : remplace les textures dessinées par du code par de **vraies photos PBR** — pavés en chevrons sur les quais, herbe sur le relief, gravier sur les routes (couleur + relief, + rugosité en qualité haute). Seules des propriétés standard des matériaux sont modifiées (aucun shader modifié → aucun risque d'écran cassé). Niveau bas : rien (rendu léger d'origine) ; moyen : 512 px ; haut : 1024 px. Si une texture manque, les autres restent ; si la qualité baisse en cours de route, retour automatique au rendu d'origine.
-- Fichiers : `tex-{grass|gravel|paving}-{1024|512}-{color|normal|rough}.webp` (18 fichiers, 4 Mo au total, servis tels quels, cache 7 jours). La couleur de l'herbe est volontairement neutre : la teinte (herbe, roche, neige) vient toujours des sommets.
-- **city-car.glb** (1,4 Mo) : voiture de sport PBR réelle (27 000 triangles, 14 maillages, textures WebP ≤ 1024) qui roule sur la Route du Château (niveaux moyen et haut seulement ; s'arrête devant le joueur). Chargée à part : si elle échoue, le reste du décor fonctionne.
-- Routes : `city-world.js` pose maintenant des UV sur les rubans (1 motif = 2,6 m) et expose `world.materials` (quai, relief, route).
-- Tests : `node city-surfaces_test.mjs`, `node city-props_test.mjs` (sans dépendance).
-- Pour changer une texture : garder la normale au format OpenGL (vert vers le haut), couleur sRGB, rugosité en niveaux de gris, 1024 et 512 px.

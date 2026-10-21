@@ -73,11 +73,10 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js',
-  'city-props.js', 'city-sprites.js', 'city-surfaces.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js'];
 
 // Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
-const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js', 'city-props.glb', 'city-car.glb']; // city-props.glb : décor 3D à plat à la racine (compressé gzip/brotli, cache 7 jours)
+const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];
 // Ressources 3D locales de JexCity (modèles GLB, textures) : noms simples uniquement, pas de sous-dossier.
 const ASSET_RE = /^[a-z0-9_-]+\.(glb|jpg|png|webp)$/i;
 
@@ -88,7 +87,7 @@ const crypto = require('crypto');
 const fsp = require('fs').promises;
 const { promisify } = require('util');
 const gzipAsync = promisify(zlib.gzip), brotliAsync = promisify(zlib.brotliCompress);
-const MIME = { '.glb': 'model/gltf-binary', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8' };
+const MIME = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8' };
 const _packed = new Map();
 
 function packed(file) { // → Promise<{ raw, gz, br, etag, type }>
@@ -133,21 +132,18 @@ function sendPacked(req, res, file, cacheControl) {
   });
 }
 
-// Textures photo (WebP déjà compressé) : servies telles quelles, cache 7 jours, liste fermée (aucun chemin fourni par le visiteur).
-const TEX_FILES = ['grass', 'gravel', 'paving'].flatMap((n) => [1024, 512].flatMap((r) => ['color', 'normal', 'rough'].map((k) => `tex-${n}-${r}-${k}.webp`)));
 function mountStatic(app) {
-  for (const f of TEX_FILES) {
-    app.get('/' + f, (req, res) => { res.setHeader('Cache-Control', 'public, max-age=604800'); res.sendFile(path.join(CITY_DIR, f), (err) => { if (err && !res.headersSent) res.status(404).end(); }); });
-  }
   const REVALIDATE = 'no-cache';                 // fichiers JexCity : ETag → 304 très légère, jamais de version périmée
   const VENDOR_CACHE = 'public, max-age=604800'; // Three.js r160 (version figée) : 7 jours
   for (const f of VENDOR_FILES) {
     app.get('/' + f, (req, res) => sendPacked(req, res, f, VENDOR_CACHE));
   }
+  // Modèles 3D : fichiers à la racine du projet (pas de sous-dossier), liste blanche stricte.
+  const CITY_MODELS = ['arbre.glb', 'herbe.webp'];
   app.get('/city-assets/:name', (req, res) => {
-    if (!ASSET_RE.test(req.params.name)) return res.status(404).end();
+    if (!ASSET_RE.test(req.params.name) || !CITY_MODELS.includes(req.params.name)) return res.status(404).end();
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.sendFile(path.join(CITY_DIR, 'city-assets', req.params.name), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    res.sendFile(path.join(CITY_DIR, req.params.name), (err) => { if (err && !res.headersSent) res.status(404).end(); });
   });
   const page = (req, res) => sendPacked(req, res, 'city.html', REVALIDATE);
   app.get('/city', page);

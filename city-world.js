@@ -199,19 +199,18 @@ export function createWorld({ scene, layout, tier, renderer }) {
   }
 
   // ── Routes de campagne : rubans posés sur le relief (une géométrie par route, aucun calcul par image) ──
-  let roadMat = null; // exposé plus bas : city-surfaces.js y pose le gravier photo
   {
-    const W = 2.6; roadMat = plain({ color: '#77746c', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const W = 2.6, roadMat = plain({ color: '#77746c', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     for (const r of G.ROADS) {
       const curve = new THREE.CatmullRomCurve3(r.pts.map(([x, z]) => new THREE.Vector3(x, 0, z)));
-      const n = Math.ceil(curve.getLength() / 4), pts = curve.getSpacedPoints(n), pos = [], idx = [], uv = [], step = curve.getLength() / n;
+      const n = Math.ceil(curve.getLength() / 4), pts = curve.getSpacedPoints(n), pos = [], idx = [];
       for (let i = 0; i <= n; i++) {
         const p = pts[i], q = pts[Math.min(n, i + 1)], o = pts[Math.max(0, i - 1)];
         let tx = q.x - o.x, tz = q.z - o.z; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
-        for (const sgn of [-1, 1]) { const x = p.x - tz * W * sgn, z = p.z + tx * W * sgn; pos.push(x, G.terrainHeight(x, z) + 0.14, z); uv.push(sgn < 0 ? 0 : 2, (i * step) / 2.6); } // 1 motif de texture = 2,6 m
+        for (const sgn of [-1, 1]) { const x = p.x - tz * W * sgn, z = p.z + tx * W * sgn; pos.push(x, G.terrainHeight(x, z) + 0.14, z); }
         if (i < n) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 2, a + 1, a + 3); }
       }
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
       const m = new THREE.Mesh(g, roadMat); m.receiveShadow = true; root.add(m);
       landmarks.push({ name: r.name, pos: new THREE.Vector3(r.pts[2][0], 0, r.pts[2][1]) });
     }
@@ -385,6 +384,12 @@ export function createWorld({ scene, layout, tier, renderer }) {
     treeCones.castShadow = false; root.add(treeCones, treeTrunks);
   }
 
+  // Modèles 3D réalistes (optionnels) : chargés après le premier affichage, jamais sur « low ». En cas d'échec, la ville reste identique.
+  let models = null;
+  if (tier.name !== 'low') setTimeout(() => {
+    import('./city-models.js').then((m) => m.attachModels({ root, layout, treeCones, treeTrunks, tier })).then((r) => { models = r; }).catch((e) => console.warn('Modèles 3D ignorés :', e && e.message));
+  }, 2500);
+
   // ── Bateaux ──
   const boats = [];
   function hull(len, wid, color) {
@@ -498,6 +503,7 @@ export function createWorld({ scene, layout, tier, renderer }) {
     }
     const nT = Math.min(t.trees, layout.trees.length); treeCones.count = nT; treeTrunks.count = nT;
     scene.fog.density = scene.fog.density; for (const m of materials) m.needsUpdate = true;
+    if (models) models.setTier(t);
   }
   setTier(tier); setHour(17.5);
 
@@ -505,7 +511,8 @@ export function createWorld({ scene, layout, tier, renderer }) {
     canalW.uniforms.uTime.value = t; lakeW.uniforms.uTime.value = t; sky.material.uniforms.uTime.value = t;
     updateBoats(t);
     sky.position.copy(camPos);
+    if (models) models.update(camPos);
   }
 
-  return { root, update, setHour, setTier, followShadow, landmarks, pickables, state, boats, materials: { quay: quayMat, terrain: terrainMat, road: roadMat } };
+  return { root, update, setHour, setTier, followShadow, landmarks, pickables, state, boats };
 }

@@ -142,8 +142,7 @@ async function boot() {
   games = createGamesClient({ socket, me, h, toast: (m) => ui.toast(m) });
   socket.on('game:state', () => solo.close()); // une partie multijoueur qui démarre remplace le jeu solo
   const solo = createSolo({ h, toast: (m) => ui.toast(m) });
-  let props = null, surfaces = null; // décor 3D (modèles GLB) et vraies textures : chargés après l'affichage de la ville
-  function setTier(t) { tier = t; world.setTier(t); props?.setTier(t); surfaces?.setTier(t); applySize(); }
+  function setTier(t) { tier = t; world.setTier(t); applySize(); }
 
   // Heure réelle de l'utilisateur (modifiable dans les réglages)
   const now = new Date(); world.setHour(now.getHours() + now.getMinutes() / 60);
@@ -176,7 +175,7 @@ async function boot() {
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);
     world.followShadow(posV); world.update(t, dt, camera.position);
-    social.update(dt, t, camera.position); posts.update(camera.position, t); props?.update(dt, t, camera.position);
+    social.update(dt, t, camera.position); posts.update(camera.position, t);
     renderer.render(scene, camera);
     // sauvegarde de position (reprise après perte de contexte) + qualité adaptative
     saveT += dt; if (saveT > 2) { saveT = 0; try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} }
@@ -197,11 +196,6 @@ async function boot() {
 
   $('#hud').hidden = false; $('#loader').classList.add('done'); start();
   setTimeout(() => { $('#hint').style.opacity = 0; }, 9000);
-  // Décor en modèles GLB (véhicules, arbres, pièces) : seulement une fois la ville affichée et le navigateur au repos → aucun ralentissement du démarrage.
-  const loadProps = () => import('./city-props.js').then((m) => m.createProps({ scene, layout, tier, getPlayer: () => player, toast: (x) => ui.toast(x) })).then((p) => { props = p; window.__jexcity.props = p; }).catch((e) => console.warn('[JexCity] décor 3D indisponible', e));
-  setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(loadProps, { timeout: 4000 }) : loadProps()), 2500);
-  const loadSurfaces = () => import('./city-surfaces.js').then((m) => m.applySurfaces({ world, tier, anisotropy: tier.name === 'high' ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 4 })).then((s) => { surfaces = s; window.__jexcity.surfaces = s; }).catch((e) => console.warn('[JexCity] textures photo indisponibles', e));
-  setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(loadSurfaces, { timeout: 6000 }) : loadSurfaces()), 3500);
   window.__jexcity = { renderer, scene, camera, controls, world, player, social, tier: () => tier.name }; // diagnostic (console)
 }
 boot().catch((e) => { console.error(e); fatal('Erreur au démarrage : ' + (e?.message || e)); });

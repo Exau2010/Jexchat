@@ -1,0 +1,8 @@
+LICENCES DES ASSETS 3D DE JEXCITY
+=================================
+Textures photo (tex-paving-*, tex-grass-*, tex-gravel-*.webp) — CC0 (domaine public), aucune attribution requise :
+  - pavés (PavingStones098) et herbe (Moss002) : ambientCG.com, d'après le dépôt GitHub mitjafelicijan/godot-material-test ; normales converties DirectX -> OpenGL, herbe neutralisée en couleur.
+  - gravier (Sandy_gravel_01) : cgbookcase.com, d'après le dépôt GitHub google/filament (third_party/textures).
+Voiture réaliste (city-car.glb) — d'après « Free concept car 004 » de Unity Fan (CC0 / domaine public selon le README de Khronos glTF-Sample-Assets), allégée avec Blender (27 000 triangles, textures WebP ≤ 1024).
+Décor low-poly (city-props.glb, city-sprites.js) — Kenney (kenney.nl), kits Starter-Kit-City-Builder / Racing / 3D-Platformer, licence MIT : copyright Kenney, voir LICENSE.md dans les dépôts d'origine.
+Three.js — licence MIT (THREE_LICENSE.txt).

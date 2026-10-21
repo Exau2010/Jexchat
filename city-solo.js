@@ -71,6 +71,15 @@ export function createSolo({ h, toast }) {
     const kd = (e) => { const m = map[e.key]; if (m) { keys[m] = 1; e.preventDefault(); } }, ku = (e) => { const m = map[e.key]; if (m) keys[m] = 0; };
     addEventListener('keydown', kd); addEventListener('keyup', ku);
     const c = cv.getContext('2d'); const car = { x: 40, y: 100, a: -Math.PI / 2, v: 0, th: Math.PI, acc: 0, p: 0 };
+    // Véhicules en vraies vues du dessus (modèles GLB Kenney) : chargés seulement ici, au moment d'ouvrir la course.
+    let sprite = null;
+    import('./city-sprites.js').then((m) => {
+      let pick = 0; try { pick = Math.max(0, m.VEHICLES.findIndex((v) => v.id === localStorage.getItem('jexcity.vehicle'))); } catch (_) { /* défaut */ }
+      const imgs = m.VEHICLES.map((v) => Object.assign(new Image(), { src: v.src })), row = h('div', { class: 'chips', style: 'justify-content:center' });
+      const sel = (i) => { pick = i; sprite = imgs[i]; try { localStorage.setItem('jexcity.vehicle', m.VEHICLES[i].id); } catch (_) { /* ignoré */ } [...row.children].forEach((b, k) => b.classList.toggle('on', k === i)); };
+      m.VEHICLES.forEach((v, i) => row.append(h('button', { class: 'chip', onclick: () => sel(i), text: v.name })));
+      body.insertBefore(row, cv); sel(pick);
+    }).catch(() => { /* sans sprites : le carré bleu d'origine reste utilisé */ });
     const info = (x, y) => { const nx = (x - TRACK.cx) / TRACK.rx, ny = (y - TRACK.cy) / TRACK.ry; return { on: Math.abs(Math.hypot(nx, ny) - 1) < TRACK.band, th: Math.atan2(ny, nx) }; };
     let start = performance.now() + 3000, done = 0, raf = 0, last = performance.now();
     function again() { Object.assign(car, { x: 40, y: 100, a: -Math.PI / 2, v: 0, th: Math.PI, acc: 0, p: 0 }); start = performance.now() + 3000; done = 0; acts.replaceChildren(); setResult(''); }
@@ -85,7 +94,7 @@ export function createSolo({ h, toast }) {
       }
       c.fillStyle = '#2f5a3a'; c.fillRect(0, 0, 300, 200); c.strokeStyle = '#5b5a58'; c.lineWidth = TRACK.band * 2 * 70 * 0.9; c.beginPath(); c.ellipse(TRACK.cx, TRACK.cy, TRACK.rx, TRACK.ry, 0, 0, 7); c.stroke();
       c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(18, 100); c.lineTo(62, 100); c.stroke();
-      c.save(); c.translate(car.x, car.y); c.rotate(car.a); c.fillStyle = '#6aa9ff'; c.fillRect(-9, -5, 18, 10); c.restore();
+      c.save(); c.translate(car.x, car.y); c.rotate(car.a); if (sprite && sprite.complete && sprite.naturalWidth) c.drawImage(sprite, -14, -7.5, 28, 15); else { c.fillStyle = '#6aa9ff'; c.fillRect(-9, -5, 18, 10); } c.restore();
       const t = now < start ? 0 : (done || now - start); c.font = '700 14px system-ui,sans-serif'; c.lineWidth = 3; c.textAlign = 'left'; c.strokeStyle = 'rgba(0,0,0,.8)';
       const hud = `${(t / 1000).toFixed(2)} s · ${Math.round(car.p * 100)} %`; c.strokeText(hud, 6, 16); c.fillStyle = '#fff'; c.fillText(hud, 6, 16);
       if (now < start) { c.textAlign = 'center'; c.font = '700 26px system-ui,sans-serif'; c.lineWidth = 4; const n = String(Math.ceil((start - now) / 1000)); c.strokeText(n, 150, 100); c.fillText(n, 150, 100); }

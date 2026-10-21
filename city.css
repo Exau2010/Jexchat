@@ -131,3 +131,9 @@ h4{margin:14px 0 6px;font-size:13px;color:var(--sub);text-transform:uppercase;le
 .gcanvas{width:100%;aspect-ratio:3/2;border-radius:12px;display:block;touch-action:none;background:#26324a}
 .gpad{display:flex;gap:8px;justify-content:center;margin:8px 0;flex-wrap:wrap}
 .btn.pad{min-width:54px;min-height:54px;padding:0 14px;font-size:20px;user-select:none;-webkit-user-select:none;touch-action:none}
+
+/* ── pièces du jour ── */
+#coin-chip{position:absolute;top:calc(var(--sat) + 12px);left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:18px;background:var(--glass);border:1px solid var(--line);font-weight:700;font-size:14px;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+#coin-chip.pop{animation:coinpop .45s ease-out}
+@keyframes coinpop{0%{transform:translateX(-50%) scale(1)}40%{transform:translateX(-50%) scale(1.3);background:rgba(240,180,99,.85);color:#2a1d08}100%{transform:translateX(-50%) scale(1)}}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}

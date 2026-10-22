@@ -10,10 +10,10 @@ const CFG = {
   high: { trees: 20, treeR: 85, grassR: 24, cell: 1.5, cap: 520 },
 };
 // Touffes de l'atlas herbe.webp : [x, y, largeur, hauteur, rapport l/h] en coordonnées UV (haut-gauche).
-const TUFTS = [[0,0,.1074,.2549,.421],[.1113,0,.1201,.1807,.665],[.2354,0,.2402,.1201,2],[.4795,0,.2402,.1201,2],[.7236,0,.1631,.1709,.954],[0,.2588,.1455,.2061,.706],[.1494,.2588,.125,.1143,1.094],[.2783,.2588,.166,.124,1.339]];
+const TUFTS = [[0.0,0.0,0.1074,0.2549,0.421],[0.1094,0.0,0.1201,0.1812,0.663],[0.2314,0.0,0.2402,0.1201,2.0],[0.4736,0.0,0.2402,0.1201,2.0],[0.7158,0.0,0.1631,0.1709,0.954],[0.0,0.2568,0.146,0.2061,0.709],[0.1479,0.2568,0.125,0.1147,1.089],[0.2749,0.2568,0.166,0.1245,1.333]];
 const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 
-export async function attachModels({ root, layout, treeCones, treeTrunks, tier }) {
+export async function attachModels({ root, layout, treeCones, treeTrunks, tier, avenue }) {
   const nav = typeof navigator !== 'undefined' ? navigator : {};
   const c = nav.connection || {};
   if (c.saveData || /(^|-)2g|3g/.test(c.effectiveType || '') || (nav.deviceMemory && nav.deviceMemory <= 2)) return null; // appareil ou réseau modeste : on garde la version légère
@@ -81,9 +81,10 @@ export async function attachModels({ root, layout, treeCones, treeTrunks, tier }
         const h = hash(i, k); if (h < 0.3) continue;
         const px = (i + hash(i, k + 91)) * cs, pz = (k + hash(i + 57, k)) * cs;
         if ((px - x) ** 2 + (pz - z) ** 2 > R * R) continue;
-        if (G.inTown(px, pz) || !G.inWorld(px, pz)) continue;
-        const y = G.terrainHeight(px, pz); if (y < 1.6 || y > 40) continue;
-        if (G.slopeAt(px, pz) > 0.5 || roadNear(px, pz)) continue;
+        const park = G.inPark(px, pz);
+        if ((G.inTown(px, pz) && !park) || !G.inWorld(px, pz) || (park && pz > G.TOWN.z1 - 48)) continue;
+        const y = park ? G.TOWN.quayY : G.terrainHeight(px, pz); if (!park && (y < 1.6 || y > 40)) continue;
+        if (!park && (G.slopeAt(px, pz) > 0.5 || roadNear(px, pz))) continue;
         const ti = Math.floor(hash(i + 3, k + 5) * TUFTS.length), m = grass.meshes[ti]; if (counts[ti] >= cap) continue;
         const asp = TUFTS[ti][4], hgt = 0.45 + hash(i, k + 13) * 0.45, wid = Math.min(1.4, hgt * asp * 1.4);
         d.position.set(px, y - 0.04, pz); d.rotation.set(0, hash(i + 9, k) * 6.283, 0); d.scale.set(wid, hgt, wid); d.updateMatrix();
@@ -101,9 +102,19 @@ export async function attachModels({ root, layout, treeCones, treeTrunks, tier }
   applyTier(tier);
   buildGrass().then((g) => { grass = g; gx = 1e9; }).catch((e) => console.warn('herbe indisponible', e));
 
+  // ── Station de métro (modèle fourni) : posée sur son emplacement, masquée au loin, le volume provisoire disparaît une fois chargée ──
+  let station = null;
+  new GLTFLoader().loadAsync('/city-assets/station.glb').then((gl) => {
+    station = new THREE.Group(); station.add(gl.scene);
+    station.position.set(G.STATION.x - 19.45, G.TOWN.quayY - 2.1, G.STATION.z + 36.8);
+    gl.scene.traverse((o) => { if (o.isMesh) { o.receiveShadow = true; o.castShadow = false; } });
+    root.add(station); if (avenue?.station) avenue.station.visible = false;
+  }).catch((e) => console.warn('station indisponible', e && e.message));
+
   return {
     setTier: applyTier,
     update(cam) {
+      if (station) station.visible = (cam.x - G.STATION.x) ** 2 + (cam.z - G.STATION.z) ** 2 < 260 * 260;
       if (!active) { if (hidden.length || (grass && grass.meshes[0].count)) { refreshTrees(cam.x, cam.z); refreshGrass(cam.x, cam.z); } return; }
       if ((cam.x - lastX) ** 2 + (cam.z - lastZ) ** 2 > 16) refreshTrees(cam.x, cam.z);
       if ((cam.x - gx) ** 2 + (cam.z - gz) ** 2 > 25) refreshGrass(cam.x, cam.z);

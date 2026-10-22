@@ -4,6 +4,7 @@
 // aucun profil n'est copié, on lit celui de JexChat. Aucune ressource externe.
 import * as THREE from 'three';
 import { heightToNormal } from './city-textures.js';
+import { WALK } from './city-walk.js';
 import { SKIN as SKINS, HAIR as HAIRS, TOPS, PANTS, SHOES, EYES, cleanLook } from './city-look.js';
 
 const SKIN = '#c98f6b', HAIR = '#1d1612', JEANS = '#27324a', SOLE = '#ece8df';
@@ -135,28 +136,35 @@ export function createAvatar({ colorA, colorB, name = '', look } = {}) {
   blob.position.y = 0.03; group.add(blob);
   if (name) group.add(nameSprite(name));
 
-  let phase = 0, walk = 0, target = false, speedK = 1;
+  // Mouvement : cycle de marche réel (city-walk.js), rejoué à une cadence qui suit la vitesse réelle du personnage
+  let phase = 0, walk = 0, target = false, speed = 0, lastX = null, lastZ = 0;
   const rot = (o, x, y, z) => o.rotation.set(x, y ?? 0, z ?? 0);
+  const N = WALK.n, CH = WALK.ch, K = 1.3;
+  const samp = (arr, ph) => { const x = ph * N, i = Math.floor(x) % N, f = x - Math.floor(x); return arr[i] + (arr[(i + 1) % N] - arr[i]) * f; };
   return {
     group,
     setWalking(on) { target = !!on; },
     face(yaw, dt) { let d = yaw - group.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); group.rotation.y += d * Math.min(1, dt * 10); },
     update(dt, t) {
+      const px = group.position.x, pz = group.position.z;
+      if (lastX !== null && dt > 0) speed += (Math.min(8, Math.hypot(px - lastX, pz - lastZ) / dt) - speed) * Math.min(1, dt * 6);
+      lastX = px; lastZ = pz;
       walk += ((target ? 1 : 0) - walk) * Math.min(1, dt * 8);
-      phase += dt * 6.4 * walk * speedK;
-      const s = Math.sin(phase), c = Math.cos(phase), idle = 1 - walk;
-      // jambes : balancement + flexion du genou pendant le passage de jambe
-      rot(lL.hip, s * 0.62 * walk, 0, 0.02); rot(lR.hip, -s * 0.62 * walk, 0, -0.02);
-      rot(lL.kn, Math.max(0, -c) * 0.95 * walk + (s > 0 ? 0 : 0), 0, 0); rot(lR.kn, Math.max(0, c) * 0.95 * walk, 0, 0);
-      rot(lL.an, -s * 0.18 * walk, 0, 0); rot(lR.an, s * 0.18 * walk, 0, 0);
-      // bras : opposés aux jambes, coude fléchi
-      rot(aL.sh, -s * 0.5 * walk + Math.sin(t * 1.2) * 0.02 * idle, 0, -0.06 + 0.02 * idle); rot(aR.sh, s * 0.5 * walk + Math.sin(t * 1.2 + 1) * 0.02 * idle, 0, 0.06 - 0.02 * idle);
-      rot(aL.el, -0.18 - Math.max(0, s) * 0.5 * walk, 0, 0); rot(aR.el, -0.18 - Math.max(0, -s) * 0.5 * walk, 0, 0);
-      // buste : rotation inverse du bassin, léger rebond, respiration, regard
-      rot(spine, 0.04 * walk, -s * 0.12 * walk, 0); pelvis.rotation.y = s * 0.1 * walk; pelvis.rotation.z = c * 0.025 * walk;
-      body.position.y = Math.abs(c) * 0.035 * walk - 0.012 * walk;
+      const freq = Math.min(1.9, Math.max(0.8, speed / 1.7)); // cycles par seconde
+      phase = (phase + dt * freq * walk) % 1;
+      const idle = 1 - walk, w = walk, f = (k) => samp(CH[k], phase);
+      // jambes : A = côté x>0 (lR), B = côté x<0 (lL)
+      rot(lR.hip, f('hipA') * K * w, 0, -0.02); rot(lL.hip, f('hipB') * K * w, 0, 0.02);
+      rot(lR.kn, Math.max(0, f('knA')) * 1.1 * w, 0, 0); rot(lL.kn, Math.max(0, f('knB')) * 1.1 * w, 0, 0);
+      rot(lR.an, f('anA') * w, 0, 0); rot(lL.an, f('anB') * w, 0, 0);
+      // bras : balancement opposé aux jambes, coude légèrement fléchi
+      rot(aR.sh, f('shA') * K * w + Math.sin(t * 1.2 + 1) * 0.02 * idle, 0, 0.06 - 0.02 * idle); rot(aL.sh, f('shB') * K * w + Math.sin(t * 1.2) * 0.02 * idle, 0, -0.06 + 0.02 * idle);
+      rot(aR.el, -0.2 + f('elA') * K * w, 0, 0); rot(aL.el, -0.2 + f('elB') * K * w, 0, 0);
+      // buste : inclinaison, rotation inverse du bassin, rebond, respiration, regard
+      rot(spine, (0.04 + f('lean')) * w, f('spY') * w, 0); pelvis.rotation.y = f('pelY') * w; pelvis.rotation.z = f('sway') * 1.2 * w;
+      body.position.y = f('bob') * 1.3 * w - 0.012 * w;
       spine.scale.set(1, 1 + Math.sin(t * 1.8) * 0.006 * idle, 1 + Math.sin(t * 1.8) * 0.01 * idle);
-      rot(headP, -0.03 * walk + Math.sin(t * 0.7) * 0.02 * idle, Math.sin(t * 0.5) * 0.12 * idle, 0);
+      rot(headP, -0.03 * w + Math.sin(t * 0.7) * 0.02 * idle, Math.sin(t * 0.5) * 0.12 * idle, 0);
     },
   };
 }

@@ -163,15 +163,15 @@ export function createUI({ me, socket, ctl }) {
   // ── carte de la ville ──
   function mapView() {
     open('Carte', (root, cur) => {
-      const W = 256, Hh = 784, S = 2, cv = h('canvas', { class: 'map', width: W, height: Hh }), c = cv.getContext('2d');
+      const S = 1.2, W = Math.round((G.TOWN.x1 - G.TOWN.x0) * S), Hh = Math.round((G.TOWN.z1 - G.TOWN.z0) * S), cv = h('canvas', { class: 'map', width: W, height: Hh }), c = cv.getContext('2d');
       const X = (x) => (x - G.TOWN.x0) * S, Z = (z) => (z - G.TOWN.z0) * S;
       const base = document.createElement('canvas'); base.width = W; base.height = Hh; const b = base.getContext('2d');
-      b.fillStyle = '#dcd3bd'; b.fillRect(0, 0, W, Hh);
-      b.fillStyle = '#5f9ab8'; b.beginPath();
+      b.fillStyle = '#c8d6bb'; b.fillRect(0, 0, W, Hh);
+      b.fillStyle = '#7d838d'; b.beginPath();
       for (let z = G.TOWN.z0; z <= G.TOWN.z1; z += 4) b.lineTo(X(G.canalX(z) - G.halfW(z)), Z(z));
       for (let z = G.TOWN.z1; z >= G.TOWN.z0; z -= 4) b.lineTo(X(G.canalX(z) + G.halfW(z)), Z(z));
       b.fill();
-      b.fillStyle = '#b5553b';
+      b.fillStyle = '#d9d2c4';
       for (const q of ctl.layout.buildings) {
         b.beginPath();
         [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sx, sz], i) => { const x = q.cx + q.ax[0] * q.hx * sx + q.az[0] * q.hz * sz, z = q.cz + q.ax[1] * q.hx * sx + q.az[1] * q.hz * sz; i ? b.lineTo(X(x), Z(z)) : b.moveTo(X(x), Z(z)); });

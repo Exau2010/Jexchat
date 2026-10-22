@@ -16,8 +16,8 @@ import { api } from './city-api.js';
 
 const $ = (s) => document.querySelector(s);
 const TIERS = {
-  low:  { name: 'low',  tex: 256,  shadows: 0,    trees: 220, fogMul: 1.25, pr: 1,    aa: false },
-  mid:  { name: 'mid',  tex: 512,  shadows: 1024, trees: 500, fogMul: 1,    pr: 1.25, aa: false },
+  low:  { name: 'low',  tex: 256,  shadows: 0,    trees: 220, fogMul: 1.25, pr: 1.5,  aa: false },
+  mid:  { name: 'mid',  tex: 512,  shadows: 1024, trees: 500, fogMul: 1,    pr: 2,    aa: true },
   high: { name: 'high', tex: 1024, shadows: 2048, trees: 800, fogMul: 1,    pr: 2,    aa: true },
 };
 function fatal(msg, retry = true) {
@@ -175,7 +175,7 @@ async function boot() {
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);
     world.followShadow(posV); world.update(t, dt, camera.position);
-    social.update(dt, t, camera.position); posts.update(camera.position, t);
+    social.update(dt, t, camera.position); posts.update(camera.position, t, dt);
     renderer.render(scene, camera);
     // sauvegarde de position (reprise après perte de contexte) + qualité adaptative
     saveT += dt; if (saveT > 2) { saveT = 0; try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} }

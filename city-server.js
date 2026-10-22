@@ -73,7 +73,7 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js', 'city-modern.js', 'city-walk.js'];
 
 // Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
 const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];
@@ -139,7 +139,7 @@ function mountStatic(app) {
     app.get('/' + f, (req, res) => sendPacked(req, res, f, VENDOR_CACHE));
   }
   // Modèles 3D : fichiers à la racine du projet (pas de sous-dossier), liste blanche stricte.
-  const CITY_MODELS = ['arbre.glb', 'herbe.webp'];
+  const CITY_MODELS = ['arbre.glb', 'herbe.webp', 'bois.jpg', 'station.glb'];
   app.get('/city-assets/:name', (req, res) => {
     if (!ASSET_RE.test(req.params.name) || !CITY_MODELS.includes(req.params.name)) return res.status(404).end();
     res.setHeader('Cache-Control', 'public, max-age=86400');

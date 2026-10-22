@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import * as G from './city-geo.js';
 import { createTextureSet } from './city-textures.js';
+import { buildAvenue } from './city-modern.js';
 
 // ─── Constructeur de géométrie fusionnée ──────────────────────────────────────
 class GB {
@@ -158,7 +159,6 @@ export function createWorld({ scene, layout, tier, renderer }) {
     const m = mk(full ? new THREE.MeshStandardMaterial(o) : new THREE.MeshLambertMaterial(o)); if (full) stdMats.push(m); return m;
   };
   const plain = (o) => { const m = mk(full ? new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, envMapIntensity: 0.6, ...o }) : new THREE.MeshLambertMaterial(o)); if (full) stdMats.push(m); return m; };
-  const wallMat = surf(TX.facade), groundMat = surf(TX.ground), roofMat = surf(TX.roof), quayMat = surf(TX.cobble);
   const stoneMat = plain({ vertexColors: true, side: THREE.DoubleSide });
   const terrainMat = surf(TX.terrain, { side: THREE.FrontSide });
   if (full) { terrainMat.roughnessMap = null; terrainMat.roughness = 0.96; }
@@ -216,128 +216,11 @@ export function createWorld({ scene, layout, tier, renderer }) {
     }
   }
 
-  // ── Sol de la ville (quais pavés), murs du canal, pont, embarcadère ──
+  // ── Grande Avenue : chaussée, trottoirs, parcs, tours, enseignes, voitures (city-modern.js) ──
   const waterY = G.TOWN.waterY, QY = G.TOWN.quayY;
-  const quay = new GB(), stone = new GB();
-  {
-    for (const side of [-1, 1]) {
-      for (let z = G.TOWN.z0; z < G.TOWN.z1; z += 4) {
-        const z2 = Math.min(z + 4, G.TOWN.z1);
-        const f1 = G.frame(z), f2 = G.frame(z2), h1 = G.halfW(z), h2 = G.halfW(z2);
-        const i1 = [f1.p[0] + f1.n[0] * side * h1, QY, z + f1.n[1] * side * h1], i2 = [f2.p[0] + f2.n[0] * side * h2, QY, z2 + f2.n[1] * side * h2];
-        const o1 = [side * G.TOWN.x1, QY, z], o2 = [side * G.TOWN.x1, QY, z2];
-        quay.quad(o1, i1, i2, o2, [o1[0] / 3, o1[2] / 3, i1[0] / 3, i1[2] / 3, i2[0] / 3, i2[2] / 3, o2[0] / 3, o2[2] / 3], '#ffffff');
-        // mur du quai côté canal
-        const b1 = [i1[0], waterY - 0.8, i1[2]], b2 = [i2[0], waterY - 0.8, i2[2]];
-        stone.quad(i1, i2, b2, b1, [0, 0, 1, 0, 1, 1, 0, 1], '#9d958a');
-      }
-      // talus sud (embouchure sur le lac)
-      const zE = G.TOWN.z1, fE = G.frame(zE), hE = G.halfW(zE);
-      const iE = [fE.p[0] + fE.n[0] * side * hE, zE + fE.n[1] * side * hE];
-      stone.quad([iE[0], QY, iE[1]], [side * G.TOWN.x1, QY, zE], [side * G.TOWN.x1, -3.6, zE], [iE[0], -3.6, iE[1]], [0, 0, 1, 0, 1, 1, 0, 1], '#8f877b');
-    }
-    // fond du canal au nord
-    const fN = G.frame(G.TOWN.z0), hN = G.halfW(G.TOWN.z0);
-    stone.quad([fN.p[0] - hN, QY, G.TOWN.z0], [fN.p[0] + hN, QY, G.TOWN.z0], [fN.p[0] + hN, waterY - 0.8, G.TOWN.z0], [fN.p[0] - hN, waterY - 0.8, G.TOWN.z0], [0, 0, 1, 0, 1, 1, 0, 1], '#9d958a');
-    // ponts
-    for (const b of G.BRIDGES) {
-      const z = b.z, f = G.frame(z), hw = G.bridgeSpan(z), N = 14, th = 0.5, par = 0.95;
-      const P = (a, zz, y) => [f.p[0] + f.n[0] * a + f.t[0] * zz, y, z + f.n[1] * a + f.t[1] * zz];
-      for (let k = 0; k < N; k++) {
-        const a1 = -hw + (2 * hw * k) / N, a2 = -hw + (2 * hw * (k + 1)) / N;
-        const y1 = QY + 1.1 * (1 - (a1 / hw) ** 2), y2 = QY + 1.1 * (1 - (a2 / hw) ** 2);
-        quay.quad(P(a1, -3, y1), P(a2, -3, y2), P(a2, 3, y2), P(a1, 3, y1), [a1 / 3, -1, a2 / 3, -1, a2 / 3, 1, a1 / 3, 1], '#ffffff');
-        for (const s of [-3, 3]) { // façade + parapet
-          stone.quad(P(a1, s, y1 - th), P(a2, s, y2 - th), P(a2, s, y2 + par), P(a1, s, y1 + par), [0, 0, 1, 0, 1, 1, 0, 1], '#bdb4a4');
-          stone.quad(P(a1, s - Math.sign(s) * 0.0, y1 + par), P(a2, s, y2 + par), P(a2, s - Math.sign(s) * 0.5, y2 + par), P(a1, s - Math.sign(s) * 0.5, y1 + par), [0, 0, 1, 0, 1, 1, 0, 1], '#cfc7b8');
-        }
-        stone.quad(P(a1, -3, y1 - th), P(a2, -3, y2 - th), P(a2, 3, y2 - th), P(a1, 3, y1 - th), [0, 0, 1, 0, 1, 1, 0, 1], '#8a8277');
-      }
-    }
-  }
-  const quayMesh = new THREE.Mesh(quay.build(), quayMat); quayMesh.receiveShadow = true; quayMesh.userData.pick = 'ground'; root.add(quayMesh); pickables.push(quayMesh);
-  const stoneMesh = new THREE.Mesh(stone.build(), stoneMat); stoneMesh.receiveShadow = true; stoneMesh.castShadow = true; root.add(stoneMesh);
-
-  // ── Eau : canal et lac ──
-  const canalW = waterMaterial(1.0), lakeW = waterMaterial(0.32);
-  {
-    const pos = [], idx = []; let k = 0;
-    for (let z = G.TOWN.z0; z <= G.TOWN.z1 + 0.01; z += 3) {
-      const zz = Math.min(z, G.TOWN.z1), f = G.frame(zz), h = G.halfW(zz);
-      pos.push(f.p[0] - f.n[0] * h, waterY, zz - f.n[1] * h, f.p[0] + f.n[0] * h, waterY, zz + f.n[1] * h);
-      if (k > 0) idx.push((k - 1) * 2, k * 2, (k - 1) * 2 + 1, (k - 1) * 2 + 1, k * 2, k * 2 + 1);
-      k++;
-    }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeBoundingSphere();
-    root.add(new THREE.Mesh(g, canalW));
-    const lake = new THREE.Mesh(new THREE.PlaneGeometry(1500, 800).rotateX(-Math.PI / 2), lakeW); lake.position.set(0, waterY, G.TOWN.z1 + 400); root.add(lake);
-  }
-
-  // ── Bâtiments ──
-  const gW = new GB(), gG = new GB(), gR = new GB();
-  const chim = [];
-  for (const b of layout.buildings) {
-    const c = [b.cx, b.cz], ax = b.ax, az = b.az, hx = b.hx, hz = b.hz;
-    const corner = (sx, sz) => [c[0] + ax[0] * hx * sx + az[0] * hz * sz, c[1] + ax[1] * hx * sx + az[1] * hz * sz];
-    const cs = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
-    const y0 = b.y0, yg = y0 + 3.6, yt = b.top;
-    const nUp = b.floors - 1;
-    for (let s = 0; s < 4; s++) {
-      const p0 = cs[s], p1 = cs[(s + 1) % 4], len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
-      const u0 = b.uOff, u1 = u0 + len / 16;
-      gG.quad([p0[0], y0, p0[1]], [p1[0], y0, p1[1]], [p1[0], yg, p1[1]], [p0[0], yg, p0[1]], [u0, 0, u1, 0, u1, 1, u0, 1], b.color);
-      if (nUp > 0) {
-        const v0 = b.vOff, v1 = v0 + nUp / 4;
-        gW.quad([p0[0], yg, p0[1]], [p1[0], yg, p1[1]], [p1[0], yt, p1[1]], [p0[0], yt, p0[1]], [u0, v0, u1, v0, u1, v1, u0, v1], b.color);
-      }
-    }
-    // toit à deux pans (faîtage le long du grand côté)
-    const ov = 0.45, ph = b.ph, rT = yt + ph, eaveY = yt - 0.15;
-    const along = b.ridgeAlongZ ? az : ax, across = b.ridgeAlongZ ? ax : az;
-    const hA = b.ridgeAlongZ ? hz : hx, hC = b.ridgeAlongZ ? hx : hz;
-    const pt = (sa, sc, y) => [c[0] + along[0] * (hA + ov) * sa + across[0] * (hC + ov) * sc, y, c[1] + along[1] * (hA + ov) * sa + across[1] * (hC + ov) * sc];
-    const ridge = (sa) => [c[0] + along[0] * (hA + ov) * sa, rT, c[1] + along[1] * (hA + ov) * sa];
-    const lenA = (hA + ov) * 2, slope = Math.hypot(hC + ov, ph);
-    for (const sc of [-1, 1]) {
-      gR.quad(pt(-1, sc, eaveY), pt(1, sc, eaveY), ridge(1), ridge(-1), [0, 0, lenA / 2, 0, lenA / 2, slope / 2, 0, slope / 2], b.roofColor);
-    }
-    // pignons
-    for (const sa of [-1, 1]) {
-      const a = [c[0] + along[0] * hA * sa + across[0] * hC, yt, c[1] + along[1] * hA * sa + across[1] * hC];
-      const bb = [c[0] + along[0] * hA * sa - across[0] * hC, yt, c[1] + along[1] * hA * sa - across[1] * hC];
-      const r = [c[0] + along[0] * hA * sa, rT, c[1] + along[1] * hA * sa];
-      gW.tri(a, bb, r, [0.005, 0.4, 0.005, 0.4, 0.005, 0.4], b.color);
-    }
-    if (b.chimney) chim.push({ x: c[0] + along[0] * hA * 0.5, z: c[1] + along[1] * hA * 0.5, y: rT + 0.2, rot: Math.atan2(az[0], az[1]) });
-  }
-  const wallMesh = new THREE.Mesh(gW.build(), wallMat), groundMesh = new THREE.Mesh(gG.build(), groundMat), roofMesh = new THREE.Mesh(gR.build(), roofMat);
-  for (const m of [wallMesh, groundMesh, roofMesh]) { m.castShadow = true; m.receiveShadow = true; m.userData.pick = 'building'; root.add(m); pickables.push(m); }
-  if (chim.length) {
-    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 1.6, 0.6), plain({ color: '#8a6a5a' }), chim.length);
-    const d = new THREE.Object3D();
-    chim.forEach((q, i) => { d.position.set(q.x, q.y, q.z); d.rotation.set(0, q.rot, 0); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
-    im.castShadow = true; root.add(im);
-  }
-
-  // ── Palais de l'Île : île en forme de proue sur le canal ──
-  {
-    const zc = G.ISLAND.z, f = G.frame(zc);
-    const shape = new THREE.Shape(); // x = travers, y = -longueur (après rotation, +z = sud)
-    [[0, -15], [2.8, -6], [3, 4], [2.2, 12], [0, 15], [-2.2, 12], [-3, 4], [-2.8, -6]].forEach(([x, l], i) => (i ? shape.lineTo(x, -l) : shape.moveTo(x, -l)));
-    const base = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: QY - waterY + 0.8, bevelEnabled: false }).rotateX(-Math.PI / 2), plain({ color: '#a79e90' }));
-    base.position.set(f.p[0], waterY - 0.8, zc); base.rotation.y = Math.atan2(f.t[0], f.t[1]); base.castShadow = base.receiveShadow = true; root.add(base);
-    const g = new THREE.Group(); g.position.set(f.p[0], QY, zc); g.rotation.y = Math.atan2(f.t[0], f.t[1]); root.add(g);
-    const stoneM = plain({ color: '#cfc5b3' }), slate = plain({ color: '#4b5563' }), dark = plain({ color: '#3b4250' });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(4.4, 11, 11), stoneM); body.position.set(0, 5.5, -1); g.add(body);
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(4.2, 4.5, 4).rotateY(Math.PI / 4).scale(1.1, 1, 1.35), slate); roof.position.set(0, 13.2, -1); g.add(roof);
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.1, 16, 12), stoneM); tower.position.set(0, 8, 9.5); g.add(tower);
-    const tr = new THREE.Mesh(new THREE.ConeGeometry(2.5, 5, 12), slate); tr.position.set(0, 18.5, 9.5); g.add(tr);
-    const t2 = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.4, 12, 10), stoneM); t2.position.set(0, 6, -9); g.add(t2);
-    const tr2 = new THREE.Mesh(new THREE.ConeGeometry(1.8, 4, 10), slate); tr2.position.set(0, 14, -9); g.add(tr2);
-    for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.3, 0.7), dark); w.position.set(2.23, 3 + (i % 3) * 2.8, -4 + Math.floor(i / 3) * 6); g.add(w); const w2 = w.clone(); w2.position.x = -2.23; g.add(w2); }
-    g.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
-    landmarks.push({ name: "Palais de l'Île", pos: new THREE.Vector3(f.p[0], QY + 21, zc + 9.5) });
-  }
+  const avenue = buildAvenue({ root, layout, tier, full, mk, stdMats, pickables, landmarks, renderer });
+  const lakeW = waterMaterial(0.32), canalW = lakeW;
+  { const lake = new THREE.Mesh(new THREE.PlaneGeometry(1500, 800).rotateX(-Math.PI / 2), lakeW); lake.position.set(0, waterY, G.TOWN.z1 + 400); root.add(lake); }
 
   // ── Château sur sa colline ──
   {
@@ -363,11 +246,11 @@ export function createWorld({ scene, layout, tier, renderer }) {
   const lampHeadMat = mk(new THREE.MeshBasicMaterial({ color: '#cfc7b0' }));
   {
     const n = layout.lamps.length, d = new THREE.Object3D();
-    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.09, 3.3, 6), plain({ color: '#2f3238' }), n);
-    const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 8, 6), lampHeadMat, n);
+    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.11, 7.4, 6), plain({ color: '#2f3238' }), n);
+    const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.36, 8, 6), lampHeadMat, n);
     layout.lamps.forEach((l, i) => {
-      d.position.set(l.x, QY + 1.65, l.z); d.updateMatrix(); poles.setMatrixAt(i, d.matrix);
-      d.position.set(l.x, QY + 3.45, l.z); d.updateMatrix(); heads.setMatrixAt(i, d.matrix);
+      d.position.set(l.x, QY + 3.7, l.z); d.updateMatrix(); poles.setMatrixAt(i, d.matrix);
+      d.position.set(l.x, QY + 7.5, l.z); d.updateMatrix(); heads.setMatrixAt(i, d.matrix);
     });
     root.add(poles, heads);
   }
@@ -387,53 +270,12 @@ export function createWorld({ scene, layout, tier, renderer }) {
   // Modèles 3D réalistes (optionnels) : chargés après le premier affichage, jamais sur « low ». En cas d'échec, la ville reste identique.
   let models = null;
   if (tier.name !== 'low') setTimeout(() => {
-    import('./city-models.js').then((m) => m.attachModels({ root, layout, treeCones, treeTrunks, tier })).then((r) => { models = r; }).catch((e) => console.warn('Modèles 3D ignorés :', e && e.message));
+    import('./city-models.js').then((m) => m.attachModels({ root, layout, treeCones, treeTrunks, tier, avenue })).then((r) => { models = r; }).catch((e) => console.warn('Modèles 3D ignorés :', e && e.message));
   }, 2500);
 
   // ── Bateaux ──
-  const boats = [];
-  function hull(len, wid, color) {
-    const sh = new THREE.Shape();
-    [[-0.55, -2.4], [0.55, -2.4], [0.95, -0.8], [0.95, 0.9], [0.45, 2.0], [0, 2.6], [-0.45, 2.0], [-0.95, 0.9], [-0.95, -0.8]].forEach(([x, l], i) => (i ? sh.lineTo(x * wid, -l * len) : sh.moveTo(x * wid, -l * len)));
-    const m = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.7, bevelEnabled: false }).rotateX(-Math.PI / 2), plain({ color }));
-    m.position.y = -0.25; m.castShadow = true; return m;
-  }
-  const boatColors = ['#2f6f9f', '#b4483b', '#e8e1d0', '#3f7a5a'];
-  for (let i = 0; i < 4; i++) {
-    const g = new THREE.Group(); g.userData.boat = true;
-    g.add(hull(1, 1, boatColors[i]));
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.8, 2.0), plain({ color: '#f3efe6' })); cab.position.set(0, 0.85, -0.4); cab.castShadow = true; g.add(cab);
-    const rf = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.12, 2.3), plain({ color: boatColors[(i + 2) % 4] })); rf.position.set(0, 1.3, -0.4); g.add(rf);
-    root.add(g); boats.push({ g, kind: 'canal', phase: i * 1.7 + 0.4, side: 1 });
-  }
-  for (let i = 0; i < 3; i++) {
-    const g = new THREE.Group(); g.userData.boat = true;
-    g.add(hull(1.15, 1.1, ['#f0ece0', '#27496d', '#a63d40'][i]));
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 6.2, 6), plain({ color: '#d9d4c7' })); mast.position.set(0, 3.1, 0.3); g.add(mast);
-    const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute([0, 1.0, -1.9, 0, 1.0, 1.2, 0, 6.0, 0.15], 3)); sg.setIndex([0, 1, 2]); sg.computeVertexNormals();
-    const sail = new THREE.Mesh(sg, plain({ color: '#fbf8f0', side: THREE.DoubleSide })); sail.castShadow = true; g.add(sail);
-    root.add(g); boats.push({ g, kind: 'lake', phase: i * 2.2, rx: 110 + i * 30, rz: 55 + i * 18, speed: 0.045 - i * 0.008 });
-  }
-  const A = (150 - -215) / 2, ZC = (150 + -215) / 2, W = 1.8 / A;
-  const laneAt = (z) => lerpLane(z);
-  function lerpLane(z) { const bump = Math.exp(-(((z - G.ISLAND.z) / 22) ** 2)); return 1.4 + bump * (((3 + G.halfW(z)) / 2) - 1.4); }
-  function boatPos(b, t) {
-    const a = W * t + b.phase, z = ZC + A * Math.sin(a), lat = b.side * laneAt(z) * Math.max(-1, Math.min(1, 3 * Math.cos(a)));
-    const f = G.frame(z); return [f.p[0] + f.n[0] * lat, z + f.n[1] * lat];
-  }
-  function updateBoats(t0) {
-    for (const b of boats) {
-      // Pause individuelle : le temps propre du bateau (t) ne s'écoule plus tant que b.paused est vrai.
-      const dtb = t0 - (b._t ?? t0); b._t = t0;
-      if (b.paused) { b.lag = (b.lag || 0) + dtb; continue; }
-      const t = t0 - (b.lag || 0);
-      let x, z, x2, z2;
-      if (b.kind === 'canal') { [x, z] = boatPos(b, t); [x2, z2] = boatPos(b, t + 0.6); }
-      else { const a = b.speed * t + b.phase, e = (aa) => [-30 + Math.cos(aa) * b.rx, 330 + Math.sin(aa) * b.rz]; [x, z] = e(a); [x2, z2] = e(a + 0.02); }
-      b.g.position.set(x, 0.02 * Math.sin(t * 1.3 + b.phase), z);
-      b.g.rotation.y = Math.atan2(x2 - x, z2 - z); b.g.rotation.z = 0.03 * Math.sin(t * 1.1 + b.phase);
-    }
-  }
+  const boats = []; // plus de bateaux : les publications circulent dans les airs (city-posts.js)
+  const updateBoats = () => {};
 
   // ── Ciel et lumières ──
   const sky = makeSky(); root.add(sky);
@@ -482,7 +324,7 @@ export function createWorld({ scene, layout, tier, renderer }) {
     }
     if (pmrem && (state.envHour == null || Math.abs(h - state.envHour) > 0.12)) { state.envHour = h; refreshEnv(); }
     for (const m of stdMats) m.envMapIntensity = 0.12 + 0.55 * dayF;
-    wallMat.emissiveIntensity = groundMat.emissiveIntensity = night * 1.15;
+    avenue.setNight(night);
     lampHeadMat.color.set('#cfc7b0').lerp(tmpA.set('#ffd592'), night);
     state.dir = dir;
   }
@@ -509,7 +351,7 @@ export function createWorld({ scene, layout, tier, renderer }) {
 
   function update(t, dt, camPos) {
     canalW.uniforms.uTime.value = t; lakeW.uniforms.uTime.value = t; sky.material.uniforms.uTime.value = t;
-    updateBoats(t);
+    updateBoats(t); avenue.update(t, dt);
     sky.position.copy(camPos);
     if (models) models.update(camPos);
   }

@@ -1,14 +1,15 @@
-// city-posts.js — JexCity : publications portées par les bateaux et affichées sur des panneaux dans les rues et le long des routes.
+// city-posts.js — JexCity : les publications s'affichent sur de grands écrans LED accrochés aux tours (avec bandeau défilant,
+// comme à Times Square) et sur des cartes lumineuses qui volent au-dessus de la Grande Avenue en circulant autour du joueur.
 // Les publications viennent de /api/posts (mêmes données et mêmes autorisations que le fil JexChat) ; rien n'est copié.
-// Toucher un bateau suspend son trajet (b.paused) et ouvre la publication ; la fermer le relance. Toucher un panneau l'ouvre aussi.
-// Légèreté : les panneaux flottent doucement (calcul trivial) et se tournent vers la caméra ; leur texture n'est dessinée que lorsqu'on
-// s'en approche (< 60 m) et libérée quand on s'éloigne (> 110 m). Aucun panneau n'est dessiné au-delà de 60 m.
+// Toucher un écran ou une carte ouvre la publication. Légèreté : la texture d'un écran n'est dessinée que lorsqu'on s'en approche
+// (au plus une par image) et libérée à distance ; les cartes volantes restent toujours proches du joueur et se tournent vers la caméra.
 import * as THREE from 'three';
 import * as G from './city-geo.js';
 import { postText } from './city-api.js';
 
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+const FLY = 12;
 
 function wrap(c, text, maxW, maxLines) {
   const words = text.split(/\s+/).filter(Boolean), lines = []; let line = '';
@@ -21,102 +22,115 @@ function wrap(c, text, maxW, maxLines) {
   return lines;
 }
 function mediaTag(p) { const t = p.mediaType !== 'none' ? p.mediaType : p.sharedFrom?.mediaType; return t === 'video' ? '▶ Vidéo' : t === 'image' ? 'Photo' : t === 'link' ? 'Lien' : ''; }
+const sRGB = (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
 
-// Étiquette claire des bateaux (police agrandie pour rester lisible à distance).
-function boatTexture(post) {
-  const cv = document.createElement('canvas'); cv.width = 384; cv.height = 160;
+// Carte d'une publication : fond sombre, texte clair, fort contraste. W×H px (2:1). Le bas reste libre pour le bandeau défilant des écrans LED.
+function postTexture(post, W, H, ledBottom) {
+  const k = W / 512, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
-  c.fillStyle = 'rgba(255,252,244,.97)'; c.beginPath();
-  if (c.roundRect) c.roundRect(4, 4, 376, 124, 18); else c.rect(4, 4, 376, 124); c.fill();
-  c.beginPath(); c.moveTo(180, 127); c.lineTo(192, 150); c.lineTo(204, 127); c.fill();
+  const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#101a2e'); g.addColorStop(1, '#1b1033'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.strokeStyle = '#35d0ff'; c.lineWidth = 6 * k; c.shadowColor = '#35d0ff'; c.shadowBlur = 14 * k; c.strokeRect(5 * k, 5 * k, W - 10 * k, H - 10 * k); c.shadowBlur = 0;
   c.textBaseline = 'top'; c.textAlign = 'left';
-  c.fillStyle = '#9a3f27'; c.font = `700 28px ${FONT}`; c.fillText((post.author?.username || 'JexChat').slice(0, 20), 20, 14);
-  c.fillStyle = '#1f1e26'; c.font = `500 24px ${FONT}`;
-  wrap(c, postText(post) || mediaTag(post) || '…', 344, 2).forEach((l, i) => c.fillText(l, 20, 52 + i * 30));
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+  c.fillStyle = '#ffd23d'; c.font = `800 ${36 * k}px ${FONT}`; c.fillText((post.author?.username || 'JexChat').slice(0, 22), 26 * k, 20 * k);
+  c.fillStyle = '#ffffff'; c.font = `600 ${31 * k}px ${FONT}`;
+  wrap(c, postText(post) || mediaTag(post) || '…', W - 52 * k, 3).forEach((l, i) => c.fillText(l, 26 * k, (72 + i * 42) * k));
+  const yb = (ledBottom ? 160 : 206) * k;
+  c.fillStyle = '#9fb4d0'; c.font = `700 ${24 * k}px ${FONT}`;
+  const tag = mediaTag(post); c.fillText(`${tag ? tag + '   ' : ''}♥ ${post.likesCount || 0}`, 26 * k, yb);
+  c.textAlign = 'right'; c.fillText('Toucher pour ouvrir', W - 26 * k, yb);
+  return sRGB(new THREE.CanvasTexture(cv));
 }
-
-// Panneau (écran) : fond sombre, texte clair, fort contraste ; 512×256 px pour 3,6 × 1,8 m.
-function boardTexture(post) {
-  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
-  const c = cv.getContext('2d');
-  c.fillStyle = '#141d2e'; c.fillRect(0, 0, 512, 256);
-  c.strokeStyle = '#f0b463'; c.lineWidth = 6; c.strokeRect(3, 3, 506, 250);
-  c.textBaseline = 'top'; c.textAlign = 'left';
-  c.fillStyle = '#f0b463'; c.font = `700 34px ${FONT}`; c.fillText((post.author?.username || 'JexChat').slice(0, 22), 24, 20);
-  c.fillStyle = '#ffffff'; c.font = `500 30px ${FONT}`;
-  wrap(c, postText(post) || mediaTag(post) || '…', 464, 3).forEach((l, i) => c.fillText(l, 24, 68 + i * 40));
-  c.fillStyle = '#b9c0cc'; c.font = `600 24px ${FONT}`;
-  const tag = mediaTag(post); c.fillText(`${tag ? tag + '   ' : ''}♥ ${post.likesCount || 0}`, 24, 206);
-  c.textAlign = 'right'; c.fillText('Toucher pour ouvrir', 488, 206);
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; return tex;
+function brandTexture() {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const c = cv.getContext('2d');
+  const g = c.createLinearGradient(0, 0, 512, 256); g.addColorStop(0, '#12082a'); g.addColorStop(1, '#06223a'); c.fillStyle = g; c.fillRect(0, 0, 512, 256);
+  c.textAlign = 'center'; c.textBaseline = 'middle'; c.shadowColor = '#35d0ff'; c.shadowBlur = 24; c.fillStyle = '#fff'; c.font = `900 84px ${FONT}`; c.fillText('JEX CITY', 256, 112);
+  c.shadowColor = '#ff4fa3'; c.fillStyle = '#ff9ccd'; c.font = `700 30px ${FONT}`; c.fillText('PUBLIE · PARTAGE · DÉCOUVRE', 256, 190);
+  return sRGB(new THREE.CanvasTexture(cv));
 }
-const idleTexture = (() => {
-  let t = null;
-  return () => { if (t) return t; const cv = document.createElement('canvas'); cv.width = 64; cv.height = 32; const c = cv.getContext('2d'); c.fillStyle = '#141d2e'; c.fillRect(0, 0, 64, 32); t = new THREE.CanvasTexture(cv); return t; };
-})();
 
 export function createPosts({ world, pickables, layout }) {
-  // ── bateaux ──
-  const slots = world.boats.map((b, i) => {
-    const hit = new THREE.Mesh(new THREE.BoxGeometry(3.2, 3, 6.5), hitMat);
-    hit.position.y = 1.2; hit.userData = { pick: 'boat', index: i }; b.g.add(hit); pickables.push(hit);
-    return { boat: b, hit, sprite: null, post: null };
-  });
-
-  // ── panneaux dans le monde : quais (près des lampadaires) et routes ──
-  const spots = [];
-  const lamps = layout?.lamps || [];
-  for (let i = 2; i < lamps.length && spots.length < 8; i += Math.max(5, Math.floor(lamps.length / 8))) {
-    const l = lamps[i], out = l.x >= G.canalX(l.z) ? 1 : -1; spots.push({ x: l.x + out * 1.7, z: l.z });
-  }
-  for (const r of G.ROADS) for (const k of [1, 3]) { const [x, z] = r.pts[k]; spots.push({ x: x + 4.5, z }); }
+  const screens = layout?.screens || [];
   const root = new THREE.Group(); world.root.add(root);
-  const poleMat = new THREE.MeshLambertMaterial({ color: '#2f3238' }), frameMat = new THREE.MeshLambertMaterial({ color: '#1a1f2b' });
-  const poleGeo = new THREE.CylinderGeometry(0.06, 0.08, 1, 6), frameGeo = new THREE.BoxGeometry(3.8, 2, 0.12), screenGeo = new THREE.PlaneGeometry(3.6, 1.8), hitGeo = new THREE.BoxGeometry(4, 2.2, 0.8);
-  const boards = spots.map((sp, i) => {
-    const g = new THREE.Group(); g.position.set(sp.x, G.groundY(sp.x, sp.z), sp.z);
-    const pole = new THREE.Mesh(poleGeo, poleMat); pole.scale.y = 3.2; pole.position.y = 1.6; g.add(pole); // le mât reste fixe
-    const face = new THREE.Group(); face.position.y = 4.1; g.add(face);                                      // l'écran flotte et se tourne vers la caméra
-    face.add(new THREE.Mesh(frameGeo, frameMat));
-    const mat = new THREE.MeshBasicMaterial({ map: idleTexture(), toneMapped: false });
-    const screen = new THREE.Mesh(screenGeo, mat); screen.position.z = 0.07; face.add(screen);
-    const hit = new THREE.Mesh(hitGeo, hitMat); hit.userData = { pick: 'board', index: i }; face.add(hit); pickables.push(hit);
-    g.visible = false; root.add(g);
-    return { g, face, mat, hit, post: null, tex: null, phase: i * 1.3 };
+  const brand = brandTexture();
+  const frameMat = new THREE.MeshLambertMaterial({ color: '#12151c' });
+  const glowMat = new THREE.MeshBasicMaterial({ color: '#35d0ff', transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const ticker = { tex: null, mats: [] };
+  const boards = [];
+
+  // ── Écrans LED géants sur les façades ──
+  screens.forEach((s, i) => {
+    const g = new THREE.Group(); g.position.set(s.x, s.y, s.z); g.rotation.y = s.side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(s.w + 0.8, s.h + 0.8, 0.45), frameMat));
+    const mat = new THREE.MeshBasicMaterial({ map: brand, toneMapped: false });
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), mat); scr.position.z = 0.24; g.add(scr);
+    const tmat = new THREE.MeshBasicMaterial({ transparent: true, toneMapped: false, depthWrite: false, opacity: 0 });
+    const tk = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h * 0.13), tmat); tk.position.set(0, -s.h * 0.435, 0.245); g.add(tk); ticker.mats.push(tmat);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(s.w * 1.25, s.h * 1.35), glowMat); glow.position.z = 0.1; g.add(glow);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(s.w, s.h, 1.2), hitMat); hit.position.z = 0.4; hit.userData = { pick: 'board', index: i }; g.add(hit); pickables.push(hit);
+    root.add(g);
+    boards.push({ led: true, g, face: g, mat, post: null, tex: null, hit, pos: g.position, range: 150, free: 230 });
   });
 
-  let current = null;
+  // ── Cartes volantes : elles tournent autour du joueur le long de l'avenue ──
+  const cardGeo = new THREE.PlaneGeometry(4.6, 2.3), cardFrame = new THREE.BoxGeometry(4.9, 2.6, 0.1), hitGeo = new THREE.BoxGeometry(5.2, 3, 0.8), glowGeo = new THREE.PlaneGeometry(6.2, 3.6);
+  for (let i = 0; i < FLY; i++) {
+    const g = new THREE.Group(); g.visible = false;
+    const face = new THREE.Group(); g.add(face);
+    face.add(new THREE.Mesh(cardFrame, frameMat));
+    const mat = new THREE.MeshBasicMaterial({ map: brand, toneMapped: false });
+    const scr = new THREE.Mesh(cardGeo, mat); scr.position.z = 0.07; face.add(scr);
+    const glow = new THREE.Mesh(glowGeo, glowMat); glow.position.z = -0.08; face.add(glow);
+    const hit = new THREE.Mesh(hitGeo, hitMat); hit.userData = { pick: 'board', index: screens.length + i }; face.add(hit); pickables.push(hit);
+    root.add(g);
+    const dir = i % 2 ? 1 : -1;
+    boards.push({ led: false, g, face, mat, post: null, tex: null, hit, pos: g.position, range: 95, free: 150, fly: { u: (i / FLY) * 240, dir, lane: ((i % 6) - 2.5) * 4.4, baseY: 7 + (i % 4) * 4.5, speed: 2.4 + (i % 3) * 1.1, phase: i * 1.7 } });
+  }
+
+  let center = 0, centerInit = false, tickerKey = '';
+  function setTicker(usable) {
+    const key = usable.map((p) => p._id || p.id || '').join(',');
+    if (key === tickerKey) return; tickerKey = key;
+    if (ticker.tex) ticker.tex.dispose();
+    const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 64; const c = cv.getContext('2d');
+    c.fillStyle = '#05070c'; c.fillRect(0, 0, 2048, 64); c.font = `800 34px ${FONT}`; c.textBaseline = 'middle';
+    let x = 20; const cols = ['#ffd23d', '#35d0ff', '#ff4fa3', '#6aff9a'];
+    usable.slice(0, 12).forEach((p, i) => { const t = '◆ ' + `${(p.author?.username || 'JexChat').slice(0, 14)}  ${(postText(p) || mediaTag(p) || '').replace(/\s+/g, ' ').slice(0, 40)}` + '   '; c.fillStyle = cols[i % 4]; c.fillText(t, x, 34); x += c.measureText(t).width; });
+    if (x < 1000) { c.fillStyle = '#35d0ff'; c.fillText('◆ JEX CITY — bienvenue sur la Grande Avenue ◆', x + 10, 34); }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.repeat.set(0.5, 1); ticker.tex = t;
+    for (const m of ticker.mats) { m.map = t; m.opacity = 1; m.needsUpdate = true; }
+  }
+
   function assign(posts) {
     const usable = (posts || []).filter((p) => p && (postText(p) || p.mediaType !== 'none'));
-    slots.forEach((s, i) => {
-      if (s.sprite) { s.boat.g.remove(s.sprite); s.sprite.material.map.dispose(); s.sprite.material.dispose(); s.sprite = null; }
-      s.post = usable[i] || null;
-      if (!s.post) return;
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: boatTexture(s.post), transparent: true, depthWrite: false }));
-      sp.scale.set(3.9, 1.63, 1); sp.position.set(0, 3.8, 0); sp.renderOrder = 7; s.boat.g.add(sp); s.sprite = sp;
-    });
     boards.forEach((b, i) => {
-      b.post = usable[slots.length + i] || null;
-      if (b.tex) { b.tex.dispose(); b.tex = null; b.mat.map = idleTexture(); b.mat.needsUpdate = true; } // redessiné à la prochaine approche
+      b.post = usable[i] || null;
+      if (b.tex) { b.tex.dispose(); b.tex = null; b.mat.map = brand; b.mat.needsUpdate = true; } // redessiné à la prochaine approche
     });
+    setTicker(usable);
   }
-  function select(index) { const s = slots[index]; if (!s?.post) return null; release(); s.boat.paused = true; current = s; return s.post; }
+  function select() { return null; }  // plus de bateaux (API conservée)
   function selectBoard(index) { return boards[index]?.post || null; }
-  function release() { if (current) { current.boat.paused = false; current = null; } }
+  function release() { /* rien à relancer : les cartes ne s'arrêtent pas */ }
 
-  function update(camPos, t = 0) {
-    for (const s of slots) if (s.sprite) s.sprite.visible = s.boat.g.position.distanceTo(camPos) < 70;
+  function update(camPos, t = 0, dt = 0.016) {
+    if (ticker.tex) ticker.tex.offset.x = (t * 0.045) % 1;
+    const zMin = G.TOWN.z0 + 50, zMax = G.TOWN.z1 - 70;
+    const target = Math.min(zMax, Math.max(zMin, camPos.z));
+    if (!centerInit) { center = target; centerInit = true; } else center += (target - center) * Math.min(1, 0.5 * Math.min(dt, 0.1));
+    let built = 0;
     for (const b of boards) {
-      const dx = camPos.x - b.g.position.x, dz = camPos.z - b.g.position.z, d = Math.hypot(dx, dz);
-      const show = !!b.post && d < 60;
+      if (b.fly) { // trajectoire : la carte parcourt une boucle de 240 m centrée sur le joueur
+        const f = b.fly; f.u = (f.u + f.dir * f.speed * Math.min(dt, 0.1) + 240) % 240;
+        b.g.position.set(f.lane + Math.sin(t * 0.4 + f.phase) * 2.2, f.baseY + Math.sin(t * 0.8 + f.phase) * 1.1, center + f.u - 120);
+      }
+      const dx = camPos.x - b.pos.x, dz = camPos.z - b.pos.z, d = Math.hypot(dx, dz);
+      const show = (b.led || !!b.post) && d < b.range * 1.6;
       if (b.g.visible !== show) b.g.visible = show;
-      if (show) {
-        if (!b.tex) { b.tex = boardTexture(b.post); b.mat.map = b.tex; b.mat.needsUpdate = true; }
-        b.face.position.y = 4.1 + Math.sin(t * 0.9 + b.phase) * 0.12; // flottement
-        let dy = Math.atan2(dx, dz) - b.face.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); b.face.rotation.y += dy * 0.08; // se tourne doucement
-      } else if (b.tex && d > 110) { b.tex.dispose(); b.tex = null; b.mat.map = idleTexture(); b.mat.needsUpdate = true; }
+      if (!show) { if (b.tex && d > b.free) { b.tex.dispose(); b.tex = null; b.mat.map = brand; b.mat.needsUpdate = true; } continue; }
+      if (b.post && !b.tex && d < b.range && built < 1) { b.tex = b.led ? postTexture(b.post, 1024, 512, true) : postTexture(b.post, 768, 384, false); b.mat.map = b.tex; b.mat.needsUpdate = true; built++; }
+      if (b.fly) { let dy = Math.atan2(dx, dz) - b.face.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); b.face.rotation.y += dy * 0.1; b.face.rotation.z = Math.sin(t * 0.6 + b.fly.phase) * 0.05; }
+      else b.mat.color.setScalar(0.92 + 0.08 * Math.sin(t * 2.2 + b.pos.z)); // légère pulsation de l'écran
     }
   }
-  return { assign, select, selectBoard, release, update, capacity: slots.length + boards.length, get selected() { return current?.post || null; }, slots, boards };
+  return { assign, select, selectBoard, release, update, capacity: boards.length, get selected() { return null; }, slots: [], boards };
 }

@@ -175,12 +175,6 @@ export function createTextureSet(S, full) {
     if (full) { set.normalMap = tex(heightToNormal(fn(size, 'height'), nStrength)); set.roughnessMap = tex(fn(size, 'rough')); }
     out[name] = set;
   };
-  mk('facade', null, S, facadeCanvas, 3.2);
-  mk('ground', null, S, groundCanvas, 3.2);
-  mk('roof', null, Math.min(S, 512), roofCanvas, 4);
-  mk('cobble', null, Math.min(S, 512), cobbleCanvas, 2.2);
-  mk('terrain', null, Math.min(S, 512), terrainCanvas, 3);
-  out.facade.emissiveMap = tex(facadeCanvas(S, 'emis'), true);
-  out.ground.emissiveMap = tex(groundCanvas(S, 'emis'), true);
+  mk('terrain', null, Math.min(S, 512), terrainCanvas, 3); // façades, sol et toits : désormais dans city-modern.js
   return out;
 }

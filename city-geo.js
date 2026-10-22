@@ -2,9 +2,14 @@
 // Contient : relief, canal, plan des bâtiments (généré, déterministe), collisions et trajets.
 // Repère : x = est, z = sud, y = haut. Le canal court du nord (z<0) vers le lac (z>152).
 
-export const TOWN = { x0: -64, x1: 64, z0: -240, z1: 152, quayY: 0.9, waterY: 0 };
+export const TOWN = { x0: -112, x1: 112, z0: -400, z1: 152, quayY: 0.9, waterY: 0 };
 export const TERRAIN = { size: 1280, seg: 160 }; // cellules de 8 m ; le « trou » de la ville tombe sur des bords de cellule
-export const BRIDGES = [{ z: -30 }, { z: 50 }];
+export const BRIDGES = []; // plus de ponts : la Grande Avenue est praticable sur toute sa largeur
+export const AV = 13;       // demi-largeur de la chaussée (26 m)
+export const SW = 7;        // largeur des trottoirs
+export const STREETS = [-304, -200, -96, -8]; // axes (z) des rues transversales (largeur 16 m)
+export const STATION = { x: 30, z: 37, hx: 10, hz: 26 }; // emprise de la station de métro (côté est)
+export const PARK_X = 92; // au-delà de |x| = 92 : parcs plantés de part et d'autre
 export const CHATEAU = { x: 190, z: -150 };
 export const ISLAND = { z: 10 }; // centre de l'île du Palais
 
@@ -38,9 +43,9 @@ export function fbm(x, z, o = 4) {
 }
 
 // ─── Canal ────────────────────────────────────────────────────────────────────
-export const canalX = (z) => 5 * Math.sin(z * 0.018);
-export const canalDX = (z) => 5 * 0.018 * Math.cos(z * 0.018);
-export const halfW = (z) => 4.5 + 3 * Math.exp(-(((z - ISLAND.z) / 16) ** 2)); // s'élargit autour de l'île
+export const canalX = () => 0;   // l'ancien canal est devenu l'axe de la Grande Avenue (API conservée)
+export const canalDX = () => 0;
+export const halfW = () => AV;
 // Repère local au canal : p = point central, t = tangente (vers le sud), n = normale (vers l'est)
 export function frame(z) {
   const dx = canalDX(z), l = Math.hypot(dx, 1);
@@ -60,7 +65,6 @@ export function terrainHeight(x, z) {
   // raccord avec le sol de la vieille ville (qui est un maillage séparé)
   const dx = Math.max(TOWN.x0 - x, 0, x - TOWN.x1), dz = Math.max(TOWN.z0 - z, 0);
   let w = (1 - smooth(0, 56, Math.hypot(dx, dz))) * (1 - smooth(TOWN.z1, TOWN.z1 + 10, z));
-  if (z >= TOWN.z1 - 0.01 && Math.abs(x - canalX(z)) < 12) return Math.min(lerp(h, TOWN.quayY, 0), -1.2); // embouchure du canal
   return lerp(h, TOWN.quayY, w);
 }
 
@@ -74,8 +78,8 @@ export function slopeAt(x, z) {
 }
 // Routes : deux routes de campagne qui partent de la ville et serpentent dans les collines (rubans plats, repérés par la carte).
 export const ROADS = [
-  { name: 'Route du Château', pts: [[64, -60], [110, -90], [150, -120], [190, -150], [230, -190], [270, -250], [300, -330]] },
-  { name: 'Route des Crêtes', pts: [[-64, -120], [-110, -170], [-170, -210], [-240, -260], [-300, -340], [-330, -420]] },
+  { name: 'Route du Château', pts: [[112, -60], [140, -80], [150, -120], [190, -150], [230, -190], [270, -250], [300, -330]] },
+  { name: 'Route des Crêtes', pts: [[-112, -120], [-140, -150], [-170, -210], [-240, -260], [-300, -340], [-330, -420]] },
 ];
 export const inTown = (x, z) => x >= TOWN.x0 && x <= TOWN.x1 && z >= TOWN.z0 && z <= TOWN.z1;
 
@@ -96,78 +100,80 @@ export function groundY(x, z) {
   return inTown(x, z) ? TOWN.quayY : terrainHeight(x, z);
 }
 
-export function blockedByCanal(x, z) {
-  const a = x - canalX(z);
-  if (Math.abs(a) >= halfW(z) + 0.35) return false;
-  for (const b of BRIDGES) if (Math.abs(z - b.z) <= 2.4) return false;
-  return true;
-}
+export function blockedByCanal() { return false; } // plus d'eau dans la ville
+export const inPark = (x, z) => Math.abs(x) > PARK_X && inTown(x, z);
 
 // ─── Plan de la ville ─────────────────────────────────────────────────────────
-const PALETTE = ['#e8c882', '#e9b4a0', '#f2e3c0', '#e0a083', '#f0d98c', '#c9d3a8', '#b8c4cf', '#d9906a', '#efd2b4', '#e6b98f'];
-const ROOFS = ['#b5553b', '#a8442f', '#8f4a3a', '#c0623f', '#9a4b35'];
+const PALETTES = {
+  stone: ['#efe7d8', '#e6dccb', '#f4efe6', '#d9d2c4', '#ece0cf'],
+  brick: ['#c98f78', '#b9785f', '#d4a083', '#a8664f', '#c4876c'],
+  glass: ['#ffffff', '#f2f8ff', '#e8f1fb'],
+};
 const pick = (R, arr) => arr[Math.floor(R() * arr.length) % arr.length];
+const FLOOR_H = 3.6, GROUND_H = 4.8;
+const onStreet = (z0, z1) => STREETS.some((s) => z1 > s - 10 && z0 < s + 10);
 
 export function buildLayout(seed = 7) {
   const R = rng(seed);
-  const buildings = [];
-  const widths = [8, 12, 12, 12, 16, 16, 20];
+  const buildings = [], screens = [];
+  const widths = [14, 18, 20, 22, 26, 30];
+  const ROWS = [{ face: AV + SW, depths: [18, 20, 22, 24], fl: [9, 11, 13, 15, 18, 22, 26] }, { face: 50, depths: [16, 18, 22], fl: [6, 8, 10, 12, 16, 18] }, { face: 76, depths: [14, 16], fl: [4, 5, 6, 8, 10] }];
+  const zEnd = TOWN.z1 - 46; // esplanade dégagée devant le lac
+  let tallCount = 0;
   for (const side of [-1, 1]) {
-    for (let row = 0; row < 3; row++) {
-      let z = TOWN.z0 + 10;
-      while (z < TOWN.z1 - 16) {
-        // places dégagées autour des ponts
-        let blocked = false;
+    ROWS.forEach((row, ri) => {
+      let z = TOWN.z0 + 14;
+      while (z < zEnd - 14) {
         const w = pick(R, widths);
-        for (const b of BRIDGES) if (z + w > b.z - 8 && z < b.z + 8) { z = b.z + 8; blocked = true; break; }
-        if (blocked) continue;
-        const depth = row === 0 ? pick(R, [8, 12, 12]) : row === 1 ? pick(R, [12, 16]) : 12;
-        let hw = 0;
-        for (let s = 0; s <= 4; s++) hw = Math.max(hw, halfW(z + (w * s) / 4));
-        const e0 = hw + 5.5;
-        const face = row === 0 ? e0 : row === 1 ? e0 + 18 : e0 + 40;
-        const zc = z + w / 2;
-        const f = frame(zc);
-        const off = face + depth / 2;
-        const cx = f.p[0] + f.n[0] * side * off, cz = zc + f.n[1] * side * off;
-        const hx = depth / 2, hz = w / 2;
-        const reach = Math.abs(cx) + hx + hz * 0.12 + 0.5;
-        z += w + (R() < 0.22 ? pick(R, [4, 6]) : 0);
-        if (reach > 61.5) continue;
-        const floors = row === 0 ? pick(R, [3, 4, 4, 5]) : row === 1 ? pick(R, [3, 3, 4, 4]) : pick(R, [2, 3, 3]);
-        const H = TOWN.quayY + 3.6 + (floors - 1) * 3;
-        const ph = Math.min(0.55 * Math.min(hx, hz), 4.2);
+        if (onStreet(z, z + w)) { const s = STREETS.find((q) => z + w > q - 10 && z < q + 10); z = s + 10; continue; }
+        if (ri === 0 && side === 1 && z + w > STATION.z - STATION.hz - 2 && z < STATION.z + STATION.hz + 2) { z = STATION.z + STATION.hz + 2; continue; }
+        const depth = pick(R, row.depths);
+        let floors = pick(R, row.fl);
+        // une tour phare en bordure de l'esplanade côté ouest
+        const landmark = ri === 0 && side === -1 && tallCount === 0 && z > -84 && w >= 18;
+        if (landmark) { floors = 34; tallCount++; }
+        const style = floors >= 16 || R() < 0.3 ? 'glass' : R() < 0.55 ? 'stone' : 'brick';
+        const cx = side * (row.face + depth / 2), cz = z + w / 2, hx = depth / 2, hz = w / 2;
+        const top = TOWN.quayY + GROUND_H + (floors - 1) * FLOOR_H;
+        const tower = ri === 0 && floors >= 12, inset = tower ? 2.5 : 0;
         buildings.push({
-          cx, cz, hx, hz, ax: f.n.slice(), az: f.t.slice(), floors, y0: TOWN.quayY, top: H, ph,
-          color: pick(R, PALETTE), roofColor: R() < 0.85 ? pick(R, ROOFS) : '#59626e',
-          ridgeAlongZ: hz >= hx, chimney: R() < 0.6, uOff: Math.floor(R() * 4) / 4, vOff: Math.floor(R() * 4) / 4,
-          h: H + ph,
+          cx, cz, hx, hz, ax: [1, 0], az: [0, 1], floors, y0: TOWN.quayY, top, ph: 0, h: top + (floors > 14 ? 6 : 1.2), side, row: ri, style,
+          color: pick(R, PALETTES[style]), tower, inset, podium: tower ? 4 : floors, uOff: Math.floor(R() * 4) / 4, vOff: 0, shop: ri === 0 || (ri === 1 && R() < 0.2),
         });
+        if (ri === 0 && floors >= 11 && w >= 16 && screens.length < 10 && R() < 0.6) {
+          const sw = Math.min(w - 4 - 2 * inset, 18), fx = side * (row.face + inset);
+          screens.push({ x: fx - side * 0.12, y: Math.min(40, Math.max(19, top * 0.42)), z: cz, side, w: sw, h: sw * 0.5 });
+        }
+        z += w + (R() < 0.15 ? 4 : 0);
       }
-    }
+    });
   }
+  // la station de métro occupe l'emprise est (chargée à part) : un volume plein pour les collisions
+  buildings.push({ cx: STATION.x, cz: STATION.z, hx: STATION.hx, hz: STATION.hz, ax: [1, 0], az: [0, 1], floors: 1, y0: TOWN.quayY, top: 8, ph: 0, h: 8, side: 1, row: 0, style: 'station', color: '#ffffff', podium: 0, tower: false, inset: 0, shop: false, station: true, uOff: 0, vOff: 0 });
   const rects = buildings.map((b) => ({ cx: b.cx, cz: b.cz, hx: b.hx, hz: b.hz, ax: b.ax, az: b.az, h: b.h }));
-  // lampadaires le long des quais
-  const lamps = [];
+  // lampadaires, arbres d'alignement et bancs le long des trottoirs
+  const lamps = [], trees = [], benches = [];
   for (const side of [-1, 1]) {
-    for (let z = TOWN.z0 + 8; z < TOWN.z1 - 6; z += 14) {
-      if (BRIDGES.some((b) => Math.abs(z - b.z) < 7)) continue;
-      const f = frame(z), o = halfW(z) + 1.1;
-      lamps.push({ x: f.p[0] + f.n[0] * side * o, z: z + f.n[1] * side * o });
-    }
+    for (let z = TOWN.z0 + 10; z < TOWN.z1 - 12; z += 16) lamps.push({ x: side * (AV + 1.3), z });
+    for (let z = TOWN.z0 + 18; z < TOWN.z1 - 14; z += 14) if (!STREETS.some((s) => Math.abs(z - s) < 12)) trees.push({ x: side * (AV + 5.4), z, y: TOWN.quayY, s: 0.55 + R() * 0.12 });
+    for (let z = TOWN.z0 + 26; z < TOWN.z1 - 20; z += 42) if (!STREETS.some((s) => Math.abs(z - s) < 12)) benches.push({ x: side * (AV + 3.2), z, side });
+    for (let z = TOWN.z0 + 8; z < TOWN.z1 - 20; z += 13) trees.push({ x: side * (PARK_X + 10 + (R() - 0.5) * 6), z: z + R() * 6, y: TOWN.quayY, s: 0.8 + R() * 0.7 });
   }
-  // arbres (collines autour de la ville)
+  // plantations de l'esplanade
+  for (const side of [-1, 1]) for (let k = 0; k < 4; k++) trees.push({ x: side * (22 + k * 18), z: TOWN.z1 - 26, y: TOWN.quayY, s: 0.7 + R() * 0.2 });
+  // arbres des collines autour de la ville (après les arbres de ville : les premiers du tableau restent affichés même au niveau « low »)
   const T = rng(99);
-  const trees = [];
-  for (let i = 0; i < 4000 && trees.length < 800; i++) {
+  const hill = [];
+  for (let i = 0; i < 4000 && hill.length < 800; i++) {
     const x = (T() * 2 - 1) * 620, z = (T() * 2 - 1) * 620;
     if (x > TOWN.x0 - 6 && x < TOWN.x1 + 6 && z > TOWN.z0 - 6 && z < TOWN.z1 + 20) continue;
     const h = terrainHeight(x, z);
     if (h < 1.5 || h > 95) continue;
     if (T() > 0.85 - smooth(30, 95, h) * 0.6) continue;
-    trees.push({ x, z, y: h, s: 0.8 + T() * 0.9 });
+    hill.push({ x, z, y: h, s: 0.8 + T() * 0.9 });
   }
-  return { buildings, rects, lamps, trees };
+  const allTrees = trees.concat(hill).slice(0, 960);
+  return { buildings, rects, lamps, trees: allTrees, benches, screens, streetTrees: trees.length };
 }
 
 // ─── Collisions et déplacements ───────────────────────────────────────────────
@@ -226,21 +232,10 @@ export function freePoint(layout, x, z, r = 0.5) {
 // Trajet : si la destination est de l'autre côté du canal, on passe par le pont le plus proche.
 export function planPath(layout, from, to) {
   to = freePoint(layout, to[0], to[1]);
-  const sa = Math.sign(from[0] - canalX(from[1])), sb = Math.sign(to[0] - canalX(to[1]));
-  const pts = [];
-  if (inTown(from[0], from[1]) && inTown(to[0], to[1]) && sa !== 0 && sb !== 0 && sa !== sb) {
-    let best = BRIDGES[0], bs = Infinity;
-    for (const b of BRIDGES) { const s = Math.abs(from[1] - b.z) + Math.abs(to[1] - b.z); if (s < bs) { bs = s; best = b; } }
-    const f = frame(best.z), off = halfW(best.z) + 2;
-    pts.push([f.p[0] + f.n[0] * sa * off, best.z + f.n[1] * sa * off]);
-    pts.push([f.p[0] - f.n[0] * sa * off, best.z - f.n[1] * sa * off]);
-  }
-  pts.push(to);
-  return pts;
+  return [to]; // plus de canal à franchir : trajet direct (le glissement le long des façades fait le reste)
 }
 export function spawnPoint() {
-  const z = BRIDGES[0].z + 9, f = frame(z), o = halfW(z) + 2.6;
-  return [f.p[0] + f.n[0] * o, z + f.n[1] * o];
+  return [-5, 30]; // au milieu de la Grande Avenue, face à la station de métro
 }
 // La caméra ne doit pas traverser un bâtiment (point en y sous le toit, dans l'emprise élargie).
 export function cameraBlocked(layout, x, y, z) {

@@ -273,6 +273,13 @@ export function createWorld({ scene, layout, tier, renderer }) {
     import('./city-models.js').then((m) => m.attachModels({ root, layout, treeCones, treeTrunks, tier, avenue })).then((r) => { models = r; }).catch((e) => console.warn('Modèles 3D ignorés :', e && e.message));
   }, 2500);
 
+  // Décor roulant et pièces (city-props.js) : chargé à la demande par city-main.js une fois le joueur connu ; échec = ville inchangée.
+  let props = null;
+  function attachProps(o) {
+    if (props) return;
+    import('./city-props.js').then((m) => m.createProps({ scene, layout, tier, ...o })).then((r) => { props = r; }).catch((e) => console.warn('Décor roulant ignoré :', e && e.message));
+  }
+
   // ── Bateaux ──
   const boats = []; // plus de bateaux : les publications circulent dans les airs (city-posts.js)
   const updateBoats = () => {};
@@ -346,6 +353,7 @@ export function createWorld({ scene, layout, tier, renderer }) {
     const nT = Math.min(t.trees, layout.trees.length); treeCones.count = nT; treeTrunks.count = nT;
     scene.fog.density = scene.fog.density; for (const m of materials) m.needsUpdate = true;
     if (models) models.setTier(t);
+    if (props) props.setTier(t);
   }
   setTier(tier); setHour(17.5);
 
@@ -354,7 +362,8 @@ export function createWorld({ scene, layout, tier, renderer }) {
     updateBoats(t); avenue.update(t, dt);
     sky.position.copy(camPos);
     if (models) models.update(camPos);
+    if (props) props.update(dt, t, camPos);
   }
 
-  return { root, update, setHour, setTier, followShadow, landmarks, pickables, state, boats };
+  return { root, update, setHour, setTier, followShadow, landmarks, pickables, state, boats, attachProps };
 }

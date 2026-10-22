@@ -149,6 +149,7 @@ async function boot() {
 
   // Réseau social : présence + publications portées par les bateaux
   social.onError = (m) => ui.toast(m);
+  setTimeout(() => world.attachProps({ getPlayer: () => player, toast: (m) => ui.toast(m) }), 3500); // décor roulant + pièces, après le premier affichage
   const connectJoin = () => social.join(mood);
   if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
   const loadPosts = () => api.latestPosts(Math.min(30, posts.capacity)).then((p) => posts.assign(p)).catch(() => {});
@@ -187,6 +188,9 @@ async function boot() {
   }
   const start = () => { running = true; clock.getDelta(); renderer.setAnimationLoop(frame); };
   const stop = () => { running = false; renderer.setAnimationLoop(null); };
+  // Arène Stickman (mini-jeux 3D 1-4 joueurs, city-arena.js) : bouton 🎮 dans la barre ; la ville se met en pause pendant la partie.
+  import('./city-arena.js').then((m) => m.mountArena({ hud: $('#hud'), toast: (x) => ui.toast(x) })).catch((e) => console.warn('Arène indisponible :', e && e.message));
+  document.addEventListener('jexarena', (e) => { if (e.detail.open) stop(); else start(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
   addEventListener('pagehide', () => { social.leave(); try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} });
 

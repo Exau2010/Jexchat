@@ -5,11 +5,12 @@
 // (au plus une par image) et libérée à distance ; les cartes volantes restent toujours proches du joueur et se tournent vers la caméra.
 import * as THREE from 'three';
 import * as G from './city-geo.js';
-import { postText } from './city-api.js';
+import { postText, safeHttps } from './city-api.js';
+import { parseVideo } from './city-media.js';
 
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-const FLY = 12;
+const FLY = 18;
 
 function wrap(c, text, maxW, maxLines) {
   const words = text.split(/\s+/).filter(Boolean), lines = []; let line = '';
@@ -24,21 +25,71 @@ function wrap(c, text, maxW, maxLines) {
 function mediaTag(p) { const t = p.mediaType !== 'none' ? p.mediaType : p.sharedFrom?.mediaType; return t === 'video' ? '▶ Vidéo' : t === 'image' ? 'Photo' : t === 'link' ? 'Lien' : ''; }
 const sRGB = (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
 
-// Carte d'une publication : fond sombre, texte clair, fort contraste. W×H px (2:1). Le bas reste libre pour le bandeau défilant des écrans LED.
-function postTexture(post, W, H, ledBottom) {
-  const k = W / 512, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const c = cv.getContext('2d');
-  const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#101a2e'); g.addColorStop(1, '#1b1033'); c.fillStyle = g; c.fillRect(0, 0, W, H);
-  c.strokeStyle = '#35d0ff'; c.lineWidth = 6 * k; c.shadowColor = '#35d0ff'; c.shadowBlur = 14 * k; c.strokeRect(5 * k, 5 * k, W - 10 * k, H - 10 * k); c.shadowBlur = 0;
+// ── Médias réels des publications (photo, aperçu vidéo) : chargés à la demande, mis en cache (24 max), jamais bloquants ──
+// crossOrigin « anonymous » : indispensable pour qu'une image distante puisse servir de texture WebGL ; si l'hébergeur ne l'autorise pas,
+// la carte garde simplement son rendu texte (aucune erreur visible).
+const mediaCache = new Map();
+function loadMedia(post) {
+  const url = safeHttps(post.mediaUrl || post.sharedFrom?.mediaUrl), mt = post.mediaType !== 'none' ? post.mediaType : post.sharedFrom?.mediaType;
+  if (!url || (mt !== 'image' && mt !== 'video')) return Promise.resolve(null);
+  if (mediaCache.has(url)) return mediaCache.get(url);
+  const pr = new Promise((res) => {
+    const done = (v) => res(v), to = setTimeout(() => done(null), 12000);
+    if (mt === 'image') {
+      const im = new Image(); im.crossOrigin = 'anonymous'; im.decoding = 'async'; im.referrerPolicy = 'no-referrer';
+      im.onload = () => { clearTimeout(to); done(im); }; im.onerror = () => { clearTimeout(to); done(null); }; im.src = url; return;
+    }
+    const info = parseVideo(url);
+    if (info.type === 'youtube' || info.type === 'vimeo') { // aperçu officiel (YouTube) ; Vimeo : pas d'aperçu sans API
+      if (!info.thumb) { clearTimeout(to); return done(null); }
+      const im = new Image(); im.crossOrigin = 'anonymous'; im.referrerPolicy = 'no-referrer';
+      im.onload = () => { clearTimeout(to); done(im); }; im.onerror = () => { clearTimeout(to); done(null); }; im.src = info.thumb; return;
+    }
+    const v = document.createElement('video'); v.crossOrigin = 'anonymous'; v.muted = true; v.playsInline = true; v.preload = 'metadata';
+    v.onloadeddata = () => { clearTimeout(to); try { v.currentTime = Math.min(0.6, (v.duration || 1) / 3); } catch (_) { /* image 0 */ } };
+    v.onseeked = () => { clearTimeout(to); done(v); }; v.onerror = () => { clearTimeout(to); done(null); };
+    v.src = url;
+  });
+  mediaCache.set(url, pr); if (mediaCache.size > 24) mediaCache.delete(mediaCache.keys().next().value);
+  return pr;
+}
+const rr = (c, x, y, w, h, r) => { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); };
+
+// Carte d'une publication : style « verre » (glassmorphisme) — photo/aperçu en fond si disponible, panneau translucide à bordure lumineuse,
+// reflet diagonal. W×H px (2:1). Le bas reste libre pour le bandeau défilant des écrans LED.
+function drawCard(cv, post, ledBottom, media) {
+  const W = cv.width, H = cv.height, k = W / 512, c = cv.getContext('2d');
+  const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#101a2e'); g.addColorStop(1, '#2a1250'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  if (media) { // « cover » : la photo remplit la carte sans déformation
+    const mw = media.videoWidth || media.naturalWidth || media.width, mh = media.videoHeight || media.naturalHeight || media.height;
+    if (mw && mh) { const sc = Math.max(W / mw, H / mh), dw = mw * sc, dh = mh * sc; try { c.drawImage(media, (W - dw) / 2, (H - dh) / 2, dw, dh); } catch (_) { /* image non exploitable */ } }
+  }
+  const sh = c.createLinearGradient(0, 0, 0, H); sh.addColorStop(0, 'rgba(6,10,24,.72)'); sh.addColorStop(0.45, 'rgba(6,10,24,.18)'); sh.addColorStop(1, 'rgba(6,10,24,.78)'); c.fillStyle = sh; c.fillRect(0, 0, W, H);
+  // panneau de verre pour le texte
+  const text = postText(post), hasText = !!text;
+  const px = 16 * k, py = 14 * k, pw = W - 32 * k, ph = (media ? (hasText ? 118 : 56) : 150) * k;
+  c.save(); rr(c, px, py, pw, ph, 18 * k); c.fillStyle = media ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.07)'; c.fill();
+  c.strokeStyle = 'rgba(255,255,255,.38)'; c.lineWidth = 2 * k; c.stroke(); c.clip();
+  const refl = c.createLinearGradient(px, py, px + pw * 0.6, py + ph); refl.addColorStop(0, 'rgba(255,255,255,.22)'); refl.addColorStop(0.5, 'rgba(255,255,255,0)'); c.fillStyle = refl; c.fillRect(px, py, pw, ph); c.restore();
+  c.strokeStyle = '#35d0ff'; c.lineWidth = 5 * k; c.shadowColor = '#35d0ff'; c.shadowBlur = 16 * k; rr(c, 4 * k, 4 * k, W - 8 * k, H - 8 * k, 20 * k); c.stroke(); c.shadowBlur = 0;
   c.textBaseline = 'top'; c.textAlign = 'left';
-  c.fillStyle = '#ffd23d'; c.font = `800 ${36 * k}px ${FONT}`; c.fillText((post.author?.username || 'JexChat').slice(0, 22), 26 * k, 20 * k);
-  c.fillStyle = '#ffffff'; c.font = `600 ${31 * k}px ${FONT}`;
-  wrap(c, postText(post) || mediaTag(post) || '…', W - 52 * k, 3).forEach((l, i) => c.fillText(l, 26 * k, (72 + i * 42) * k));
-  const yb = (ledBottom ? 160 : 206) * k;
-  c.fillStyle = '#9fb4d0'; c.font = `700 ${24 * k}px ${FONT}`;
-  const tag = mediaTag(post); c.fillText(`${tag ? tag + '   ' : ''}♥ ${post.likesCount || 0}`, 26 * k, yb);
-  c.textAlign = 'right'; c.fillText('Toucher pour ouvrir', W - 26 * k, yb);
-  return sRGB(new THREE.CanvasTexture(cv));
+  c.fillStyle = '#ffd23d'; c.font = `800 ${34 * k}px ${FONT}`; c.fillText((post.author?.username || 'JexChat').slice(0, 22), 32 * k, 24 * k);
+  if (hasText || !media) { c.fillStyle = '#ffffff'; c.font = `600 ${29 * k}px ${FONT}`; c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 4 * k;
+    wrap(c, text || mediaTag(post) || '…', W - 70 * k, media ? 2 : 3).forEach((l, i) => c.fillText(l, 32 * k, (68 + i * 38) * k)); c.shadowBlur = 0; }
+  const yb = (ledBottom ? 160 : 206) * k, tag = mediaTag(post);
+  if (media && post.mediaType !== 'image' && (post.mediaType === 'video' || post.sharedFrom?.mediaType === 'video')) { // pastille lecture
+    c.fillStyle = 'rgba(0,0,0,.45)'; c.beginPath(); c.arc(W / 2, H / 2, 38 * k, 0, 7); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.moveTo(W / 2 - 12 * k, H / 2 - 20 * k); c.lineTo(W / 2 + 22 * k, H / 2); c.lineTo(W / 2 - 12 * k, H / 2 + 20 * k); c.fill();
+  }
+  c.fillStyle = '#d6e4ff'; c.font = `700 ${24 * k}px ${FONT}`; c.shadowColor = 'rgba(0,0,0,.7)'; c.shadowBlur = 5 * k; c.fillText(`${tag ? tag + '   ' : ''}♥ ${post.likesCount || 0}`, 32 * k, yb);
+  c.textAlign = 'right'; c.fillText('Toucher pour ouvrir', W - 32 * k, yb); c.shadowBlur = 0;
+}
+function postTexture(post, W, H, ledBottom) {
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  drawCard(cv, post, ledBottom, null);
+  const tex = sRGB(new THREE.CanvasTexture(cv));
+  loadMedia(post).then((m) => { if (m && !tex.userData.dead) { drawCard(cv, post, ledBottom, m); tex.needsUpdate = true; } });
+  const dispose = tex.dispose.bind(tex); tex.dispose = () => { tex.userData.dead = true; dispose(); };
+  return tex;
 }
 function brandTexture() {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const c = cv.getContext('2d');

@@ -102,7 +102,7 @@ async function boot() {
   const social = createSocial({ scene, layout, pickables, socket, getSelf: () => player });
   const posts = createPosts({ world, pickables, layout });
 
-  let ui, games; let mood = '';
+  let ui, games, venues = null; let mood = '';
   const walkTo = (x, z) => {
     const path = G.planPath(layout, [player.x, player.z], [x, z]);
     if (!path.length) return;
@@ -119,6 +119,7 @@ async function boot() {
       if (kind === 'avatar') { const r = social.remotes.get(hit.object.userData.userId); if (r) ui.showUser({ ...r.user, id: r.id }); }
       else if (kind === 'boat') { const p = posts.select(hit.object.userData.index); if (p) ui.showPost(p, () => posts.release()); }
       else if (kind === 'board') { const p = posts.selectBoard(hit.object.userData.index); if (p) ui.showPost(p); }
+      else if (kind === 'venue') venues?.open(hit.object.userData.venue);
       else walkTo(hit.point.x, hit.point.z); // façade : on rejoint le point libre le plus proche
     },
   });
@@ -149,6 +150,17 @@ async function boot() {
 
   // Réseau social : présence + publications portées par les bateaux
   social.onError = (m) => ui.toast(m);
+  // Quartier des loisirs (stade, cafétéria, supermarché, musée) : city-venues.js ; chaque lieu ouvre une activité réelle.
+  const look0 = { ...look };
+  import('./city-venues.js').then((m) => {
+    venues = m.createVenues({ root: world.root, layout, pickables, actions: {
+      openArena: () => document.getElementById('b-arena')?.click(),
+      setMood: (t) => { mood = (t || '').trim().slice(0, 40); social.setMood(mood); ui.setMoodLabel(mood); },
+      randomOutfit: () => { const r = (n) => Math.floor(Math.random() * (n + 1)); setLook({ ...look, tc: 1 + r(7), pc: r(6), sc: r(5) }); },
+      restoreOutfit: () => setLook({ ...look0 }),
+      toast: (x) => ui.toast(x),
+    } });
+  }).catch((e) => console.warn('Quartier des loisirs indisponible :', e && e.message));
   setTimeout(() => world.attachProps({ getPlayer: () => player, toast: (m) => ui.toast(m) }), 3500); // décor roulant + pièces, après le premier affichage
   const connectJoin = () => social.join(mood);
   if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
@@ -175,7 +187,7 @@ async function boot() {
     posV.set(player.x, G.groundY(player.x, player.z), player.z); av.group.position.copy(posV); av.update(dt, t);
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);
-    world.followShadow(posV); world.update(t, dt, camera.position);
+    world.followShadow(posV); world.update(t, dt, camera.position); venues?.update(t);
     social.update(dt, t, camera.position); posts.update(camera.position, t, dt);
     renderer.render(scene, camera);
     // sauvegarde de position (reprise après perte de contexte) + qualité adaptative

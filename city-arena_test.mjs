@@ -20,4 +20,10 @@ ok(s.players.filter((p) => p.alive).length <= 1, 'sumo : au plus un survivant');
 const s2 = A.makeSumo(2); for (let i = 0; i < 60 * 3; i++) A.stepSumo(s2, 1 / 60, []); ok(s2.players.every((p) => p.alive), 'sumo : sans action, personne ne tombe en 3 s');
 const s3 = A.makeSumo(2); s3.players[0].x = 0; s3.players[0].z = 0; s3.players[1].x = 0.5; s3.players[1].z = 0; s3.players[0].head = 0; A.stepSumo(s3, 1 / 60, [true]);
 ok(s3.players[1].vx > 0 || s3.players[1].x > 0.5, 'sumo : un élan pousse l’adversaire');
+// Balai : 4 robots → une manche se termine, un seul survivant ; sans saut on est touché ; un saut bien placé évite le bras
+const w = A.makeSweep(4); w.players.forEach((p) => { p.bot = true; });
+for (let i = 0; i < 60 * 120 && !w.done; i++) A.stepSweep(w, 1 / 60, []);
+ok(w.done, 'balai : la manche se termine'); ok(w.players.filter((p) => p.alive).length <= 1, 'balai : au plus un survivant');
+const w2 = A.makeSweep(2); w2.players[0].bot = true; for (let i = 0; i < 60 * 30 && w2.players[1].alive; i++) A.stepSweep(w2, 1 / 60, []);
+ok(!w2.players[1].alive, 'balai : sans sauter, le bras vous touche');
 console.log(fails ? fails + ' échec(s)' : 'Tous les tests passent'); process.exit(fails ? 1 : 0);

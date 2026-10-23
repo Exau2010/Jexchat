@@ -1,6 +1,6 @@
 // city-arena.js — JexCity : « Arène Stickman » — mini-jeux 3D de fête pour 1 à 4 joueurs sur le même appareil (style jeux Stickman Party).
 // Inspiration : sensations « une seule touche par joueur » ; personnages, niveaux et ressources 100 % originaux (bonshommes bâtons générés en code).
-// Modes : COURSE (haies, une touche = saut, chronométrée) et SUMO (plateforme qui rétrécit, une touche = élan, dernier debout gagne).
+// Modes : COURSE (haies, une touche = saut, chronométrée), SUMO (plateforme qui rétrécit, une touche = élan) et BALAI (bras tournant, une touche = saut) ; dernier debout gagne.
 // Les places non occupées par un humain sont jouées par des robots. Aucun réseau, aucune base : records dans localStorage (jexcity.arena.*).
 // Moteur indépendant (sa propre scène et son propre rendu, libérés à la fermeture) : la ville n'est pas modifiée.
 import * as THREE from 'three';
@@ -42,7 +42,7 @@ export function makeSumo(n) {
   return { n, players: pl, time: 0, radius: 7, done: false, winner: null };
 }
 export function stepSumo(s, dt, taps) {
-  s.time += dt; s.radius = Math.max(3, 7 - s.time * 0.1);
+  s.time += dt; s.radius = Math.max(1.2, 7 - s.time * 0.1);
   const alive = s.players.filter((p) => p.alive);
   for (const p of alive) {
     p.head += 2.4 * dt; p.cd = Math.max(0, p.cd - dt);
@@ -59,6 +59,29 @@ export function stepSumo(s, dt, taps) {
       const rv = (B.vx - A.vx) * dx + (B.vz - A.vz) * dz; if (rv < 0) { const j = -rv * 1.15; A.vx -= dx * j; A.vz -= dz * j; B.vx += dx * j; B.vz += dz * j; } }
   }
   for (const p of alive) if (Math.hypot(p.x, p.z) > s.radius + 0.2) { p.alive = false; p.out = s.time; }
+  const left = s.players.filter((p) => p.alive);
+  if (left.length <= 1 && !s.done) { s.done = true; s.winner = left[0] ? left[0].i : null; if (left[0]) left[0].out = s.time + 1; }
+  return s;
+}
+
+
+// Mode BALAI : un bras tournant de plus en plus vite balaie la plateforme ; une touche = saut ; touché au sol = éliminé. Un 2e bras arrive après 15 s.
+const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+export function makeSweep(n) {
+  return { n, time: 0, a: 0, bars: 1, done: false, winner: null,
+    players: Array.from({ length: n }, (_, i) => ({ i, ang: (i / n) * Math.PI * 2, y: 0, vy: 0, alive: true, out: null, bot: false, react: 0.05 + Math.random() * 0.22, err: 0.15 + Math.random() * 0.85, jit: 0 })) };
+}
+export function stepSweep(s, dt, taps) {
+  s.time += dt; const w = Math.min(8, 1.5 + 0.1 * s.time); s.a = wrapA(s.a + w * dt); s.bars = s.time > 15 ? 2 : 1;
+  const angs = s.bars === 2 ? [s.a, wrapA(s.a + Math.PI)] : [s.a];
+  for (const p of s.players) {
+    if (!p.alive) continue;
+    const grounded = p.y <= 0.001 && p.vy <= 0;
+    if (p.bot && grounded) for (const b of angs) { const d = wrapA(p.ang - b); if (d > 0 && d < w * (0.28 + p.react + p.jit)) { taps[p.i] = true; p.jit = (Math.random() - 0.5) * 0.6 * p.err; break; } }
+    if (taps[p.i] && grounded) p.vy = JUMP;
+    p.vy -= GRAV * dt; p.y = Math.max(0, p.y + p.vy * dt); if (p.y === 0 && p.vy < 0) p.vy = 0;
+    for (const b of angs) if (Math.abs(wrapA(p.ang - b)) < 0.2 && p.y < 0.55) { p.alive = false; p.out = s.time; break; }
+  }
   const left = s.players.filter((p) => p.alive);
   if (left.length <= 1 && !s.done) { s.done = true; s.winner = left[0] ? left[0].i : null; if (left[0]) left[0].out = s.time + 1; }
   return s;
@@ -127,7 +150,7 @@ export function mountArena({ hud, toast = () => {} } = {}) {
     ov.append(el('div', null, 'Une touche par joueur — jusqu’à 4 sur le même écran (clavier : A · L · V · N)'));
     const r1 = el('div', 'row'), r2 = el('div', 'row');
     [1, 2, 3, 4].forEach((n) => { const b = el('button', cfg.humans === n ? 'on' : '', n + (n > 1 ? ' joueurs' : ' joueur')); b.onclick = () => { cfg.humans = n; menu(); }; r1.append(b); });
-    [['course', '🏃 Course de haies'], ['sumo', '💥 Sumo']].forEach(([k, l]) => { const b = el('button', cfg.mode === k ? 'on' : '', l); b.onclick = () => { cfg.mode = k; menu(); }; r2.append(b); });
+    [['course', '🏃 Course de haies'], ['sumo', '💥 Sumo'], ['sweep', '🌀 Balai']].forEach(([k, l]) => { const b = el('button', cfg.mode === k ? 'on' : '', l); b.onclick = () => { cfg.mode = k; menu(); }; r2.append(b); });
     const go = el('button', 'go', 'Jouer'); go.onclick = start;
     const rec = store.get('jexcity.arena.course'); const info = el('div', null, rec ? `Record course : ${(+rec).toFixed(2)} s` : 'Les places libres sont jouées par des robots.');
     ov.append(r1, r2, go, info); root.append(ov);
@@ -138,7 +161,7 @@ export function mountArena({ hud, toast = () => {} } = {}) {
   function start() {
     clearOverlay(); clearScene(); taps = []; const n = 4;
     const seed = (Date.now() / 1000) | 0;
-    game = cfg.mode === 'course' ? makeCourse(n, seed) : makeSumo(n);
+    game = cfg.mode === 'course' ? makeCourse(n, seed) : cfg.mode === 'sweep' ? makeSweep(n) : makeSumo(n);
     game.players.forEach((p, i) => { p.bot = i >= cfg.humans; });
     figs = game.players.map((p, i) => { const f = stick(COLORS[i]); scene.add(f); return f; });
     if (cfg.mode === 'course') {
@@ -149,6 +172,12 @@ export function mountArena({ hud, toast = () => {} } = {}) {
       const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 8), new THREE.MeshBasicMaterial({ color: '#111' })); fin.position.set(TRACK, 0.02, 0); add(fin);
       const arch = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshLambertMaterial({ color: '#35d0ff' })); [-4, 4].forEach((z) => { const a = arch.clone(); a.position.set(TRACK, 2, z); add(a); });
       const bar = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 8.4), new THREE.MeshLambertMaterial({ color: '#ffd23d' })); bar.position.set(TRACK, 4, 0); add(bar);
+    } else if (cfg.mode === 'sweep') {
+      const disc = add(new THREE.Mesh(new THREE.CylinderGeometry(6.2, 6.2, 0.6, 40), new THREE.MeshLambertMaterial({ color: '#c9d4e8' }))); disc.position.y = -0.3;
+      const ring = add(new THREE.Mesh(new THREE.TorusGeometry(6.2, 0.08, 6, 48), new THREE.MeshBasicMaterial({ color: '#35d0ff' }))); ring.rotation.x = Math.PI / 2; ring.position.y = 0.02;
+      const sea = add(new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ color: '#2a6fb0' }))); sea.rotation.x = -Math.PI / 2; sea.position.y = -3;
+      const hub = add(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 12), new THREE.MeshLambertMaterial({ color: '#333' }))); hub.position.y = 0.5;
+      [0, 1].forEach((k) => { const bar = new THREE.Mesh(new THREE.BoxGeometry(6, 0.5, 0.45), new THREE.MeshLambertMaterial({ color: k ? '#ff4fa3' : '#ff8a3d' })); bar.geometry.translate(3, 0, 0); bar.position.y = 0.3; bar.name = 'bar' + k; add(bar); });
     } else {
       const disc = add(new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.6, 40), new THREE.MeshLambertMaterial({ color: '#c9d4e8' }))); disc.position.y = -0.3; disc.name = 'disc';
       const sea = add(new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ color: '#2a6fb0' }))); sea.rotation.x = -Math.PI / 2; sea.position.y = -3;
@@ -159,16 +188,19 @@ export function mountArena({ hud, toast = () => {} } = {}) {
       const b = el('div', 'pad', `${NAMES[i]} · ${KEYS[i].toUpperCase()}`); b.style.cssText = `${pos[i]};background:${COLORS[i]}55;border-color:${COLORS[i]}`;
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); taps[i] = true; }); root.append(b);
     }
-    root.append(el('div', 'top', cfg.mode === 'course' ? 'Sautez les haies — touchez votre bouton !' : 'Poussez vos adversaires hors de la plateforme — touchez pour foncer !'));
+    root.append(el('div', 'top', cfg.mode === 'course' ? 'Sautez les haies — touchez votre bouton !' : cfg.mode === 'sweep' ? 'Sautez par-dessus le balai — le dernier debout gagne !' : 'Poussez vos adversaires hors de la plateforme — touchez pour foncer !'));
     phase = 'count'; cd = 3.2; setCamera(0);
   }
   function setCamera(dt) {
     if (cfg.mode === 'course') { const lead = Math.max(...game.players.map((p) => p.x)), tx = lead - 2; cam.position.lerp(new THREE.Vector3(tx + 2, 5.2, 11), dt ? Math.min(1, dt * 4) : 1); cam.lookAt(cam.position.x + 3, 0.8, 0); }
-    else { cam.position.set(0, 12, 10.5); cam.lookAt(0, 0, 0.5); }
+    else { cam.position.set(0, cfg.mode === 'sweep' ? 11 : 12, 10.5); cam.lookAt(0, 0, 0.5); }
   }
   function sync(t) {
     if (cfg.mode === 'course') game.players.forEach((p, i) => { const f = figs[i]; f.position.set(p.x, p.y, (i - 1.5) * 1.6); f.rotation.y = Math.PI / 2; pose(f, t + i, p.t != null ? 0 : p.y > 0.05 ? 0.2 : p.stun > 0 ? 0.1 : 0.9); f.rotation.x = p.stun > 0 ? -0.35 : 0; });
-    else {
+    else if (cfg.mode === 'sweep') {
+      const b0 = scene.getObjectByName('bar0'), b1 = scene.getObjectByName('bar1'); if (b0) b0.rotation.y = -game.a; if (b1) { b1.visible = game.bars === 2; b1.rotation.y = -(game.a + Math.PI); }
+      game.players.forEach((p, i) => { const f = figs[i]; if (!p.alive) { f.position.y -= 0.25; f.rotation.z += 0.2; return; } f.position.set(Math.cos(p.ang) * 4.6, p.y, Math.sin(p.ang) * 4.6); f.rotation.y = -p.ang - Math.PI / 2 + Math.PI; pose(f, t + i, p.y > 0.05 ? 0.3 : 0); });
+    } else {
       const disc = scene.getObjectByName('disc'); if (disc) disc.scale.set(game.radius, 1, game.radius);
       game.players.forEach((p, i) => { const f = figs[i]; if (!p.alive) { f.position.y -= 0.25; f.rotation.z += 0.2; return; } f.position.set(p.x, 0, p.z); f.rotation.y = -p.head + Math.PI / 2; pose(f, t + i, Math.min(0.8, Math.hypot(p.vx, p.vz) * 0.2 + 0.1)); });
     }
@@ -198,9 +230,9 @@ export function mountArena({ hud, toast = () => {} } = {}) {
         if (cd > 0) root.append(el('div', 'big', String(Math.ceil(cd - 0.2) || 'GO!'))); else phase = 'play';
         taps = [];
       } else if (phase === 'play') {
-        if (cfg.mode === 'course') stepCourse(game, dt, taps); else stepSumo(game, dt, taps);
+        if (cfg.mode === 'course') stepCourse(game, dt, taps); else if (cfg.mode === 'sweep') stepSweep(game, dt, taps); else stepSumo(game, dt, taps);
         taps = []; if (game.done) setTimeout(() => { if (phase === 'ending') finish(); }, 900), phase = 'ending';
-      } else if (phase === 'ending') { if (cfg.mode === 'course') stepCourse(game, dt, []); else stepSumo(game, dt, []); }
+      } else if (phase === 'ending') { if (cfg.mode === 'course') stepCourse(game, dt, []); else if (cfg.mode === 'sweep') stepSweep(game, dt, []); else stepSumo(game, dt, []); }
       sync(now / 1000); setCamera(dt);
     } else { cam.position.set(0, 6, 14); cam.lookAt(0, 0, 0); }
     renderer.render(scene, cam);

@@ -160,7 +160,7 @@ export function buildLayout(seed = 7) {
     for (let z = TOWN.z0 + 8; z < TOWN.z1 - 20; z += 13) trees.push({ x: side * (PARK_X + 10 + (R() - 0.5) * 6), z: z + R() * 6, y: TOWN.quayY, s: 0.8 + R() * 0.7 });
   }
   // plantations de l'esplanade
-  for (const side of [-1, 1]) for (let k = 0; k < 4; k++) trees.push({ x: side * (22 + k * 18), z: TOWN.z1 - 26, y: TOWN.quayY, s: 0.7 + R() * 0.2 });
+  for (const side of [-1, 1]) for (let k = 0; k < 3; k++) trees.push({ x: side * (22 + k * 18), z: TOWN.z1 - 26, y: TOWN.quayY, s: 0.7 + R() * 0.2 });
   // arbres des collines autour de la ville (après les arbres de ville : les premiers du tableau restent affichés même au niveau « low »)
   const T = rng(99);
   const hill = [];

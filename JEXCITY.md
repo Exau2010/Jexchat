@@ -55,3 +55,11 @@ Nouvelles routes : `GET /api/city/search`, `POST /api/city/hide-refresh/:id`, `P
 **Jeux d'action** (course 2 tours, tir arcade 3 vies / 60 s / 5 points) : vue de dessus en canvas, positions annoncées à ~10/s puis bornées par le serveur, touches et chrono décidés par le serveur, rien en base. **Limites** : navigateur intégré = YouTube/Vimeo seulement (CSP + protections des sites), autres sites ouverts à côté ; pas de chargement par zones (visibilité par distance, textures des panneaux à la demande) ; non vérifié sur vrai téléphone, vraie base MongoDB, vrai Socket.IO.
 
 **Lot 5** : personnalisation étendue (haut, pantalon, chaussures, yeux, barbe, 8 coiffures, 6 accessoires, aléatoire/réinitialiser ; indices validés côté serveur) et jeux solo dans `city-solo.js` (morpion contre l'ordinateur 3 niveaux, contre-la-montre, cibles ; aucun réseau, records dans localStorage `jexcity.best.*`).
+
+## Lot 6 (correctifs 3D, quartier des loisirs, Arène)
+- **Textures blanches** : la CSP globale interdisait `blob:` (textures intégrées aux GLB). `city-server.js` l'autorise uniquement sur la page `/city` (JexChat inchangé).
+- **Décor roulant** (`city-props.js`, `city-props.glb`, `city-car.glb`) enfin branché : `city-world.js` (`attachProps`), `city-main.js`, routes dans `city-server.js`.
+- **Publications** (`city-posts.js`) : vraie photo / aperçu vidéo en fond (si l'hébergeur autorise CORS), style verre, 18 cartes.
+- **Quartier des loisirs** (`city-venues.js`, esplanade sud) : cafétéria (humeur), musée technologique (expositions), supermarché (tenue), stade → Arène. Murs et comptoirs ajoutés aux collisions ; 2 arbres de l'esplanade retirés dans `city-geo.js` (k < 3).
+- **Arène Stickman** (`city-arena.js`, bouton 🎮) : Course de haies, Sumo, Balai ; 1 à 4 joueurs + robots ; tests `node city-arena_test.mjs`.
+- Vérifié dans Chromium (WebGL logiciel) ; non vérifié sur vrai téléphone, vrai serveur, vraie base. L'heure du jeu suit l'horloge réelle (la ville est sombre la nuit).

@@ -13,6 +13,7 @@ import { createSolo } from './city-solo.js';
 import { cleanLook, loadLocalLook, saveLocalLook } from './city-look.js';
 import { disposeAvatar } from './city-social.js';
 import { api } from './city-api.js';
+import { createPartyClient } from './city-party.js';
 
 const $ = (s) => document.querySelector(s);
 const TIERS = {
@@ -99,11 +100,19 @@ async function boot() {
 
   const socket = window.io ? window.io({ transports: ['websocket', 'polling'] }) : null;
   if (!socket) return fatal('Connexion temps réel indisponible.');
-  const social = createSocial({ scene, layout, pickables, socket, getSelf: () => player });
+  let cinema = null;
+  const social = createSocial({ scene, layout, pickables, socket, getSelf: () => player, seatAt: (x, z) => (cinema ? cinema.seatAt(x, z) : null) });
+  const party = createPartyClient({ socket, me, toast: (m) => ui?.toast(m) });
+  const presentPlayers = () => [...social.remotes.values()].map((r) => ({ id: r.id, username: r.user.username }));
   const posts = createPosts({ world, pickables, layout });
 
   let ui, games, venues = null; let mood = '';
+  const walkPath = (pts) => { // trajet à étapes (portes, allées) : chaque étape est annoncée aux autres joueurs pour qu'ils suivent le même chemin
+    if (!pts.length) return; player.path = pts.map((p) => [p[0], p[1]]); player.stuck = 0; player.dest = pts[pts.length - 1];
+    social.emitMove(player.x, player.z, pts[0][0], pts[0][1]); $('#hint').style.opacity = 0;
+  };
   const walkTo = (x, z) => {
+    if (player.sitting) cinema?.standUp();
     const path = G.planPath(layout, [player.x, player.z], [x, z]);
     if (!path.length) return;
     player.path = path; player.stuck = 0; player.dest = path[path.length - 1];
@@ -119,7 +128,8 @@ async function boot() {
       if (kind === 'avatar') { const r = social.remotes.get(hit.object.userData.userId); if (r) ui.showUser({ ...r.user, id: r.id }); }
       else if (kind === 'boat') { const p = posts.select(hit.object.userData.index); if (p) ui.showPost(p, () => posts.release()); }
       else if (kind === 'board') { const p = posts.selectBoard(hit.object.userData.index); if (p) ui.showPost(p); }
-      else if (kind === 'venue') venues?.open(hit.object.userData.venue);
+      else if (kind === 'seat') { if (cinema) cinema.pickSeat(hit.instanceId); }
+      else if (kind === 'venue') { const u = hit.object.userData; if (u.venue === 'cinema') cinema?.open('cinema', u); else if (u.venue === 'floor') walkTo(hit.point.x, hit.point.z); else venues?.open(u.venue); }
       else walkTo(hit.point.x, hit.point.z); // façade : on rejoint le point libre le plus proche
     },
   });
@@ -129,6 +139,7 @@ async function boot() {
     me, socket,
     ctl: {
       muted: config.muted, layout, walkTo,
+      goTo: (name) => { const P = { 'Cinéma': [-19, -150], 'Cafétéria': [66, -74], 'Musée': [62, -266], 'Supermarché': [-62, -266], 'Stade': [84, 118] }[name]; if (!P) return false; walkTo(P[0], P[1]); return true; },
       games: { invite: (id, name, g) => { solo.close(); return games.invite(id, name, g); } },
       solo: { start: (k) => { if (games.active) return ui.toast('Quittez d’abord votre partie multijoueur.'); solo[k](); } },
       look: { get: () => look, set: setLook },
@@ -145,8 +156,8 @@ async function boot() {
   const solo = createSolo({ h, toast: (m) => ui.toast(m) });
   function setTier(t) { tier = t; world.setTier(t); applySize(); }
 
-  // Heure réelle de l'utilisateur (modifiable dans les réglages)
-  const now = new Date(); world.setHour(now.getHours() + now.getMinutes() / 60);
+  // L'heure du jeu NE suit PLUS l'horloge réelle : fin d'après-midi lumineuse par défaut (réglable à la main dans Réglages).
+  world.setHour(16.5);
 
   // Réseau social : présence + publications portées par les bateaux
   social.onError = (m) => ui.toast(m);
@@ -161,6 +172,14 @@ async function boot() {
       toast: (x) => ui.toast(x),
     } });
   }).catch((e) => console.warn('Quartier des loisirs indisponible :', e && e.message));
+  // Cinéma JexCity (grand bâtiment à l'ouest de l'avenue) : séances seul(e) ou avec des amis invités (autres appareils).
+  import('./city-cinema.js').then((m) => {
+    cinema = m.createCinema({ root: world.root, layout, pickables, party, me, toast: (x) => ui.toast(x), getPlayers: presentPlayers });
+    cinema.actions.setMood = (t) => { mood = (t || '').trim().slice(0, 40); social.setMood(mood); ui.setMoodLabel(mood); };
+    cinema.bind({ getPlayer: () => player, remotes: () => [...social.remotes.values()], walkPath,
+      sit: (on, yaw) => { av.setSeated(on); if (on && yaw != null) av.group.rotation.y = yaw; },
+      emitMove: (x, z, tx, tz) => social.emitMove(x, z, tx, tz) });
+  }).catch((e) => console.warn('Cinéma indisponible :', e && e.message));
   setTimeout(() => world.attachProps({ getPlayer: () => player, toast: (m) => ui.toast(m) }), 3500); // décor roulant + pièces, après le premier affichage
   const connectJoin = () => social.join(mood);
   if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
@@ -173,9 +192,9 @@ async function boot() {
     if (!running) return;
     const dt = Math.min(clock.getDelta(), 0.05); t += dt;
     // déplacement
-    if (player.path.length) {
+    if (player.path.length && !player.sitting) {
       const [wx, wz] = player.path[0], dx = wx - player.x, dz = wz - player.z, d = Math.hypot(dx, dz);
-      if (d < 0.25) { player.path.shift(); }
+      if (d < 0.25) { player.path.shift(); if (player.path.length) social.emitMove(player.x, player.z, player.path[0][0], player.path[0][1]); }
       else {
         const s = Math.min(d, player.speed * dt), [nx, nz] = G.slideMove(layout, player.x, player.z, player.x + dx / d * s, player.z + dz / d * s);
         if (Math.hypot(nx - player.x, nz - player.z) < s * 0.25) { player.stuck += dt; if (player.stuck > 0.5) player.path.length = 0; } else { player.stuck = 0; player.x = nx; player.z = nz; }
@@ -187,7 +206,7 @@ async function boot() {
     posV.set(player.x, G.groundY(player.x, player.z), player.z); av.group.position.copy(posV); av.update(dt, t);
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);
-    world.followShadow(posV); world.update(t, dt, camera.position); venues?.update(t);
+    world.followShadow(posV); world.update(t, dt, camera.position); venues?.update(t); cinema?.update(t, player);
     social.update(dt, t, camera.position); posts.update(camera.position, t, dt);
     renderer.render(scene, camera);
     // sauvegarde de position (reprise après perte de contexte) + qualité adaptative
@@ -201,7 +220,9 @@ async function boot() {
   const start = () => { running = true; clock.getDelta(); renderer.setAnimationLoop(frame); };
   const stop = () => { running = false; renderer.setAnimationLoop(null); };
   // Arène Stickman (mini-jeux 3D 1-4 joueurs, city-arena.js) : bouton 🎮 dans la barre ; la ville se met en pause pendant la partie.
-  import('./city-arena.js').then((m) => m.mountArena({ hud: $('#hud'), toast: (x) => ui.toast(x) })).catch((e) => console.warn('Arène indisponible :', e && e.message));
+  import('./city-arena.js').then((m) => m.mountArena({ hud: $('#hud'), toast: (x) => ui.toast(x), party, me, getPlayers: presentPlayers })).catch((e) => console.warn('Arène indisponible :', e && e.message));
+  // Première visite : visite guidée (city-tour.js), une seule fois par compte et par appareil.
+  import('./city-tour.js').then((m) => m.startTourIfFirst({ me, hud: $('#hud'), walkTo, landmarks: () => ({ cinema: { x: -19, z: -150 }, stadium: { x: 84, z: 118 }, cafe: { x: 66, z: -74 }, museum: { x: 62, z: -266 }, market: { x: -62, z: -266 } }) })).catch(() => {});
   document.addEventListener('jexarena', (e) => { if (e.detail.open) stop(); else start(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
   addEventListener('pagehide', () => { social.leave(); try { sessionStorage.setItem('jexcity.pos', JSON.stringify({ x: player.x, z: player.z })); } catch (_) {} });

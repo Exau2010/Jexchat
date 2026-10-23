@@ -33,7 +33,7 @@ export function disposeAvatar(group) {
   group.traverse((o) => { if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } else if (o.geometry && o.geometry !== hitGeo) o.geometry.dispose(); });
 }
 
-export function createSocial({ scene, layout, pickables, socket, getSelf }) {
+export function createSocial({ scene, layout, pickables, socket, getSelf, seatAt = null }) {
   const remotes = new Map(); // id -> { id, user, av, hit, mood, x, z, path }
   let joined = false, pingT = 0, moveT = 0;
 
@@ -106,6 +106,8 @@ export function createSocial({ scene, layout, pickables, socket, getSelf }) {
         }
       }
       r.av.setWalking(r.path.length > 0);
+      const sq = seatAt && !r.path.length ? seatAt(r.x, r.z) : null; // assis dans un fauteuil de cinéma (position exacte d'un siège, immobile)
+      r.av.setSeated(!!sq); if (sq) r.av.face(sq.yaw, dt * 3);
       g.position.set(r.x, G.groundY(r.x, r.z), r.z);
       const near = Math.hypot(camPos.x - r.x, camPos.z - r.z) < FAR;
       g.visible = near;

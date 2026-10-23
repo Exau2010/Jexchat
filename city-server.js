@@ -73,7 +73,7 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js', 'city-modern.js', 'city-walk.js', 'city-props.js', 'city-arena.js', 'city-venues.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js', 'city-modern.js', 'city-walk.js', 'city-props.js', 'city-arena.js', 'city-venues.js', 'city-party.js', 'city-cinema.js', 'city-tour.js'];
 
 // Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
 const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];
@@ -478,10 +478,12 @@ function mountApi({ app, io, db, sec, sendPushNotification, now = () => Date.now
 
   const presence = createPresence({ io, db, sec, now });
   const games = createGames({ io, db, sec, presence, isMuted: (o, u) => isMuted(o, u), now });
-  io.on('connection', (socket) => { if (socket.userId) { presence.attach(socket); games.attach(socket); } });
+  const party = require('./city-party-server.js').createParty({ io, db, sec, presence, isMuted: (o, u) => isMuted(o, u), now });
+  io.on('connection', (socket) => { if (socket.userId) { presence.attach(socket); games.attach(socket); party.attach(socket); } });
   const timers = [
     setInterval(presence.sweep, 30 * 1000),
     setInterval(games.sweep, 15 * 1000),
+    setInterval(party.sweep, 15 * 1000),
     setInterval(() => { const t = now(); for (const [k, v] of inviteLast) if (t - v > INVITE.perTargetMs) inviteLast.delete(k); }, 10 * 60 * 1000),
   ];
   timers.forEach((t) => t.unref && t.unref());
@@ -520,7 +522,7 @@ function mountApi({ app, io, db, sec, sendPushNotification, now = () => Date.now
       if (!sec.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'ID invalide.' });
       if (!sec.rateLimit(`${req.user._id}:cityrefresh`, 20, 60000)) return res.status(429).json({ error: 'Trop de requêtes.' });
       await presence.refreshPair(req.user._id.toString(), req.params.id);
-      games.onBlockChange(req.user._id.toString(), req.params.id);
+      games.onBlockChange(req.user._id.toString(), req.params.id); party.onBlockChange(req.user._id.toString(), req.params.id);
       return res.json({ ok: true });
     } catch (_) { return res.status(500).json({ error: 'Erreur.' }); }
   });

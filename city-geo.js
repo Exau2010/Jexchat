@@ -13,6 +13,17 @@ export const PARK_X = 92; // au-delà de |x| = 92 : parcs plantés de part et d'
 export const CHATEAU = { x: 190, z: -150 };
 export const ISLAND = { z: 10 }; // centre de l'île du Palais
 
+// ─── Lieux ouverts répartis dans toute la ville (parcelles réservées : aucun immeuble généré dessus) ───
+// Cinéma (ouest, grand), cafétéria (est), musée (est, nord), supermarché (ouest, nord). Le stade reste sur l'esplanade sud.
+export const LOTS = {
+  cinema: { cx: -48, cz: -150, hx: 24, hz: 30 },     // façade et entrée côté avenue (est)
+  cafe: { cx: 66, cz: -60, hx: 12, hz: 10.5 },
+  museum: { cx: 62, cz: -252, hx: 13, hz: 10.5 },
+  market: { cx: -62, cz: -252, hx: 15, hz: 10.5 },
+};
+const lotHit = (x, z, rx, rz) => Object.values(LOTS).some((l) => Math.abs(x - l.cx) < l.hx + rx + 2 && Math.abs(z - l.cz) < l.hz + rz + 2);
+// Sols praticables à hauteur variable (gradins du cinéma, rampes) : { x0, x1, z0, z1, y(x, z) } enregistrés par city-cinema.js
+export const FLOORS = [];
 export const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 export const lerp = (a, b, t) => a + (b - a) * t;
 export function smooth(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
@@ -95,6 +106,7 @@ export function bridgeY(x, z) {
   return null;
 }
 export function groundY(x, z) {
+  for (let i = 0; i < FLOORS.length; i++) { const f = FLOORS[i]; if (x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1) return f.y(x, z); }
   const b = bridgeY(x, z);
   if (b !== null) return b;
   return inTown(x, z) ? TOWN.quayY : terrainHeight(x, z);
@@ -129,6 +141,7 @@ export function buildLayout(seed = 7) {
         if (ri === 0 && side === 1 && z + w > STATION.z - STATION.hz - 2 && z < STATION.z + STATION.hz + 2) { z = STATION.z + STATION.hz + 2; continue; }
         const depth = pick(R, row.depths);
         let floors = pick(R, row.fl);
+        if (lotHit(side * (row.face + depth / 2), z + w / 2, depth / 2, w / 2)) { z += w; continue; } // parcelle réservée à un lieu ouvert
         // une tour phare en bordure de l'esplanade côté ouest
         const landmark = ri === 0 && side === -1 && tallCount === 0 && z > -84 && w >= 18;
         if (landmark) { floors = 34; tallCount++; }
@@ -172,8 +185,9 @@ export function buildLayout(seed = 7) {
     if (T() > 0.85 - smooth(30, 95, h) * 0.6) continue;
     hill.push({ x, z, y: h, s: 0.8 + T() * 0.9 });
   }
-  const allTrees = trees.concat(hill).slice(0, 960);
-  return { buildings, rects, lamps, trees: allTrees, benches, screens, streetTrees: trees.length };
+  const keep = (o) => !lotHit(o.x, o.z, 1, 1) && !(Math.abs(o.x) > 88 && Math.abs(o.z + 96) < 7); // ni lot, ni rue des voitures
+  const allTrees = trees.filter(keep).concat(hill).slice(0, 960);
+  return { buildings, rects, lamps: lamps.filter(keep), trees: allTrees, benches: benches.filter(keep), screens, streetTrees: trees.length };
 }
 
 // ─── Collisions et déplacements ───────────────────────────────────────────────

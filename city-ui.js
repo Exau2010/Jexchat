@@ -163,31 +163,44 @@ export function createUI({ me, socket, ctl }) {
   // ── carte de la ville ──
   function mapView() {
     open('Carte', (root, cur) => {
-      const S = 1.2, W = Math.round((G.TOWN.x1 - G.TOWN.x0) * S), Hh = Math.round((G.TOWN.z1 - G.TOWN.z0) * S), cv = h('canvas', { class: 'map', width: W, height: Hh }), c = cv.getContext('2d');
+      const S = 1.5, W = Math.round((G.TOWN.x1 - G.TOWN.x0) * S), Hh = Math.round((G.TOWN.z1 - G.TOWN.z0) * S), cv = h('canvas', { class: 'map', width: W, height: Hh }), c = cv.getContext('2d');
       const X = (x) => (x - G.TOWN.x0) * S, Z = (z) => (z - G.TOWN.z0) * S;
       const base = document.createElement('canvas'); base.width = W; base.height = Hh; const b = base.getContext('2d');
-      b.fillStyle = '#c8d6bb'; b.fillRect(0, 0, W, Hh);
-      b.fillStyle = '#7d838d'; b.beginPath();
-      for (let z = G.TOWN.z0; z <= G.TOWN.z1; z += 4) b.lineTo(X(G.canalX(z) - G.halfW(z)), Z(z));
-      for (let z = G.TOWN.z1; z >= G.TOWN.z0; z -= 4) b.lineTo(X(G.canalX(z) + G.halfW(z)), Z(z));
-      b.fill();
-      b.fillStyle = '#d9d2c4';
+      // fond : herbe, parcs de chaque côté, esplanade et lac au sud
+      b.fillStyle = '#b9d3a0'; b.fillRect(0, 0, W, Hh);
+      b.fillStyle = '#9fc486'; b.fillRect(0, 0, X(-G.PARK_X), Hh); b.fillRect(X(G.PARK_X), 0, W - X(G.PARK_X), Hh);
+      b.fillStyle = '#9cc7e8'; b.fillRect(0, Z(G.TOWN.z1 - 6), W, Hh - Z(G.TOWN.z1 - 6));
+      // chaussée : Grande Avenue + rues transversales, trottoirs clairs
+      b.fillStyle = '#e8e2d2'; b.fillRect(X(-G.AV - G.SW), 0, (G.AV + G.SW) * 2 * S, Hh);
+      for (const z of G.STREETS) b.fillRect(0, Z(z - 8), W, 16 * S);
+      b.fillStyle = '#6f7682'; b.fillRect(X(-G.AV), 0, G.AV * 2 * S, Hh); for (const z of G.STREETS) b.fillRect(0, Z(z - 7), W, 14 * S);
+      b.strokeStyle = '#f4e9b8'; b.lineWidth = 1.5; b.setLineDash([8, 8]); b.beginPath(); b.moveTo(X(0), 0); b.lineTo(X(0), Hh); b.stroke(); b.setLineDash([]);
+      // immeubles (tons selon le style) ; stations et tours plus sombres
       for (const q of ctl.layout.buildings) {
-        b.beginPath();
+        b.fillStyle = q.style === 'brick' ? '#c79a85' : q.style === 'glass' ? '#a9bfd6' : q.style === 'station' ? '#8b93a3' : '#d9d2c4'; b.beginPath();
         [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sx, sz], i) => { const x = q.cx + q.ax[0] * q.hx * sx + q.az[0] * q.hz * sz, z = q.cz + q.ax[1] * q.hx * sx + q.az[1] * q.hz * sz; i ? b.lineTo(X(x), Z(z)) : b.moveTo(X(x), Z(z)); });
-        b.closePath(); b.fill();
+        b.closePath(); b.fill(); b.strokeStyle = 'rgba(60,50,40,.35)'; b.lineWidth = 0.8; b.stroke();
       }
-      b.fillStyle = '#efe6cf'; for (const br of G.BRIDGES) { const f = G.frame(br.z); b.fillRect(X(f.p[0] - G.bridgeSpan(br.z)), Z(br.z) - 5, G.bridgeSpan(br.z) * 2 * S, 10); }
+      // lieux ouverts (parcelles) : pastilles colorées avec icône
+      const POI = [['🎬', 'Cinéma', G.LOTS.cinema, '#c0392b'], ['☕', 'Cafétéria', G.LOTS.cafe, '#e8a55a'], ['🧠', 'Musée', G.LOTS.museum, '#35a6d0'], ['🛒', 'Supermarché', G.LOTS.market, '#3fbf6b'], ['🏟️', 'Stade', { cx: 84, cz: 134, hx: 13, hz: 13 }, '#e6b800']];
+      b.textAlign = 'center'; b.textBaseline = 'middle';
+      for (const [ic, name, l, col] of POI) { b.fillStyle = col + 'cc'; b.fillRect(X(l.cx - l.hx), Z(l.cz - l.hz), l.hx * 2 * S, l.hz * 2 * S); b.strokeStyle = col; b.lineWidth = 2; b.strokeRect(X(l.cx - l.hx), Z(l.cz - l.hz), l.hx * 2 * S, l.hz * 2 * S); b.font = '22px system-ui'; b.fillText(ic, X(l.cx), Z(l.cz) - 4); b.font = '700 11px system-ui'; b.lineWidth = 3; b.strokeStyle = '#fff'; b.strokeText(name, X(l.cx), Z(l.cz) + 16); b.fillStyle = '#1d3550'; b.fillText(name, X(l.cx), Z(l.cz) + 16); }
+      b.fillStyle = '#1d3550'; b.font = '700 12px system-ui'; b.fillText('N ↑', 18, 14); b.fillText('Grande Avenue', X(0), 14);
       const draw = () => {
         c.drawImage(base, 0, 0);
         for (const r of ctl.remotes()) { c.fillStyle = '#fff'; c.strokeStyle = '#1d3550'; c.lineWidth = 2; c.beginPath(); c.arc(X(r.x), Z(r.z), 5, 0, 7); c.fill(); c.stroke(); }
         const s = ctl.self(); c.fillStyle = '#f0b463'; c.strokeStyle = '#2a1d08'; c.lineWidth = 2.5; c.beginPath(); c.arc(X(s.x), Z(s.z), 7, 0, 7); c.fill(); c.stroke();
+        c.fillStyle = '#1d3550'; c.font = '700 11px system-ui'; c.textAlign = 'center'; c.fillText('Vous', X(s.x), Z(s.z) - 12);
+        if (s.dest) { c.strokeStyle = '#f0b463'; c.setLineDash([5, 4]); c.lineWidth = 2; c.beginPath(); c.moveTo(X(s.x), Z(s.z)); c.lineTo(X(s.dest[0]), Z(s.dest[1])); c.stroke(); c.setLineDash([]); }
       };
       draw(); const iv = setInterval(draw, 400); cur.cleanup = () => clearInterval(iv);
-      cv.addEventListener('click', (e) => { const r = cv.getBoundingClientRect(); ctl.walkTo(G.TOWN.x0 + ((e.clientX - r.left) / r.width) * (G.TOWN.x1 - G.TOWN.x0), G.TOWN.z0 + ((e.clientY - r.top) / r.height) * (G.TOWN.z1 - G.TOWN.z0)); toast('En route'); });
+      const toWorld = (e) => { const r = cv.getBoundingClientRect(); return [G.TOWN.x0 + ((e.clientX - r.left) / r.width) * (G.TOWN.x1 - G.TOWN.x0), G.TOWN.z0 + ((e.clientY - r.top) / r.height) * (G.TOWN.z1 - G.TOWN.z0)]; };
+      cv.addEventListener('click', (e) => { const [x, z] = toWorld(e); const hitPoi = POI.find(([, , l]) => Math.abs(x - l.cx) < l.hx && Math.abs(z - l.cz) < l.hz); if (hitPoi) { ctl.goTo?.(hitPoi[1]) || ctl.walkTo(x, z); } else ctl.walkTo(x, z); toast('En route'); });
       const places = ctl.landmarks().filter((l) => G.inWorld(l.pos.x, l.pos.z));
-      return h('div', null, cv, h('div', { class: 'sub', style: 'text-align:center;margin-top:6px', text: 'Touchez la carte pour vous y rendre' }),
-        ...(places.length ? [h('h4', { text: 'Lieux' }), ...places.map((l) => h('button', { class: 'row', onclick: () => { ctl.walkTo(l.pos.x, l.pos.z); close(); } }, h('div', { class: 'grow', text: l.name })))] : []));
+      const poiRows = POI.map(([ic, name, l]) => h('button', { class: 'row', onclick: () => { (ctl.goTo?.(name)) || ctl.walkTo(l.cx, l.cz); close(); } }, h('div', { class: 'grow', text: `${ic} ${name}` })));
+      return h('div', null, cv, h('div', { class: 'sub', style: 'text-align:center;margin-top:6px', text: 'Touchez la carte ou un lieu pour vous y rendre' }),
+        h('h4', { text: 'Lieux ouverts' }), ...poiRows,
+        ...(places.length ? [h('h4', { text: 'Sites' }), ...places.map((l) => h('button', { class: 'row', onclick: () => { ctl.walkTo(l.pos.x, l.pos.z); close(); } }, h('div', { class: 'grow', text: l.name })))] : []));
     });
   }
 

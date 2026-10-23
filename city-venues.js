@@ -7,12 +7,12 @@ import * as THREE from 'three';
 import * as G from './city-geo.js';
 import { LOOK_MAX } from './city-look.js';
 
-const Y0 = G.TOWN.quayY, CZ = 139.5, HZ = 9.5, WALL_H = 6.5;
+const Y0 = G.TOWN.quayY, HZ = 9.5, WALL_H = 6.5;
 export const STADIUM = { x: 84, z: 134, r: 13 };
 export const VENUES = {
-  cafe: { name: 'CAFÉTÉRIA', x: -80, hx: 11, color: '#e8a55a', accent: '#ffb347' },
-  museum: { name: 'MUSÉE TECH', x: -48, hx: 12, color: '#cfd8e6', accent: '#35d0ff' },
-  market: { name: 'SUPERMARCHÉ', x: 40, hx: 14, color: '#e9eef0', accent: '#4dff88' },
+  cafe: { name: 'CAFÉTÉRIA', x: G.LOTS.cafe.cx, z: G.LOTS.cafe.cz, hx: 11, color: '#e8a55a', accent: '#ffb347' },
+  museum: { name: 'MUSÉE TECH', x: G.LOTS.museum.cx, z: G.LOTS.museum.cz, hx: 12, color: '#cfd8e6', accent: '#35d0ff' },
+  market: { name: 'SUPERMARCHÉ', x: G.LOTS.market.cx, z: G.LOTS.market.cz, hx: 14, color: '#e9eef0', accent: '#4dff88' },
   stadium: { name: 'STADE JEXCITY', x: STADIUM.x, accent: '#ffd23d' },
 };
 
@@ -42,7 +42,7 @@ export function createVenues({ root, layout, pickables, panelHost = document.bod
 
   // ── Coque commune : sol, mur du fond, murs latéraux, toit, bandeau d'enseigne. Façade nord entièrement ouverte. ──
   function shell(key) {
-    const V = VENUES[key], cx = V.x, hx = V.hx, grp = new THREE.Group(); g.add(grp);
+    const V = VENUES[key], cx = V.x, CZ = V.z, hx = V.hx, grp = new THREE.Group(); g.add(grp);
     box(grp, hx * 2, 0.2, HZ * 2, '#b8b2a6', cx, Y0 + 0.1, CZ, mat(key === 'cafe' ? '#8a6a4a' : key === 'museum' ? '#dfe3ea' : '#d8dcdc'));
     box(grp, hx * 2, WALL_H, 0.5, V.color, cx, Y0 + WALL_H / 2, CZ + HZ - 0.25);
     box(grp, 0.5, WALL_H, HZ * 2, V.color, cx - hx + 0.25, Y0 + WALL_H / 2, CZ); box(grp, 0.5, WALL_H, HZ * 2, V.color, cx + hx - 0.25, Y0 + WALL_H / 2, CZ);
@@ -53,13 +53,13 @@ export function createVenues({ root, layout, pickables, panelHost = document.bod
     layout.rects.push(rect(cx, CZ + HZ - 0.25, hx, 0.3, WALL_H), rect(cx - hx + 0.25, CZ, 0.3, HZ, WALL_H), rect(cx + hx - 0.25, CZ, 0.3, HZ, WALL_H));
     // éclairage intérieur : plafonnier lumineux (matériau émissif, aucune lumière dynamique)
     box(grp, hx * 1.2, 0.08, 0.8, '#fff', cx, Y0 + WALL_H - 0.2, CZ - 1, glow('#fff7e0')); box(grp, hx * 1.2, 0.08, 0.8, '#fff', cx, Y0 + WALL_H - 0.2, CZ + 4, glow('#fff7e0'));
-    return { grp, cx, hx };
+    return { grp, cx, hx, CZ };
   }
   const solid = (grp, w, h, d, color, x, y, z, m) => { const b = box(grp, w, h, d, color, x, Y0 + 0.2 + y, z, m); layout.rects.push(rect(x, z, w / 2, d / 2, h + 0.2)); return b; };
   const deco = (grp, w, h, d, color, x, y, z, m) => box(grp, w, h, d, color, x, Y0 + 0.2 + y, z, m);
 
   // ── Cafétéria : comptoir au fond, machine à café, tables et tabourets ──
-  { const { grp, cx, hx } = shell('cafe');
+  { const { grp, cx, hx, CZ } = shell('cafe');
     solid(grp, hx * 1.5, 1.1, 1.2, '#5b3b24', cx, 0.55, CZ + HZ - 2.2); deco(grp, hx * 1.5, 0.1, 1.5, '#e9dcc8', cx, 1.15, CZ + HZ - 2.2);
     deco(grp, 1, 0.8, 0.7, '#222', cx - 3, 1.6, CZ + HZ - 2.2); deco(grp, 0.6, 0.3, 0.1, '#ff4d4d', cx - 3, 2.1, CZ + HZ - 2.6, glow('#ff4d4d'));
     for (let i = 0; i < 6; i++) deco(grp, 0.9, 0.9, 0.2, ['#c0392b', '#f1c40f', '#27ae60', '#2980b9'][i % 4], cx - 4.5 + i * 1.8, 4, CZ + HZ - 0.7); // tableaux au mur
@@ -72,7 +72,7 @@ export function createVenues({ root, layout, pickables, panelHost = document.bod
     });
   }
   // ── Musée technologique : socles lumineux avec objets en rotation, grands écrans au mur ──
-  { const { grp, cx, hx } = shell('museum');
+  { const { grp, cx, hx, CZ } = shell('museum');
     for (let i = 0; i < 4; i++) deco(grp, 3.2, 2.2, 0.1, '#0b1020', cx - hx + 3.6 + i * ((hx * 2 - 7.2) / 3), 3.4, CZ + HZ - 0.55, glow(['#0d4d6b', '#4d1a6b', '#0d6b45', '#6b3a0d'][i]));
     const shapes = [new THREE.IcosahedronGeometry(0.6, 0), new THREE.TorusKnotGeometry(0.4, 0.14, 40, 8), new THREE.OctahedronGeometry(0.65), new THREE.BoxGeometry(0.8, 0.8, 0.8)];
     [[-1, -3.2], [0, -4.4], [1, -3.2], [-0.5, 1.2], [0.5, 1.2]].forEach(([k, dz], i) => {
@@ -83,7 +83,7 @@ export function createVenues({ root, layout, pickables, panelHost = document.bod
     });
   }
   // ── Supermarché : rayons (étagères colorées), caisses, enseigne ──
-  { const { grp, cx, hx } = shell('market');
+  { const { grp, cx, hx, CZ } = shell('market');
     const cols = ['#e74c3c', '#f1c40f', '#27ae60', '#3498db', '#e67e22', '#9b59b6'];
     for (let r = 0; r < 3; r++) {
       const z = CZ - 3.4 + r * 3.4; solid(grp, hx * 1.2, 1.9, 0.9, '#9aa3ad', cx - 2, 0.95, z);

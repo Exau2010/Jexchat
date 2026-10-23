@@ -63,3 +63,14 @@ Nouvelles routes : `GET /api/city/search`, `POST /api/city/hide-refresh/:id`, `P
 - **Quartier des loisirs** (`city-venues.js`, esplanade sud) : cafétéria (humeur), musée technologique (expositions), supermarché (tenue), stade → Arène. Murs et comptoirs ajoutés aux collisions ; 2 arbres de l'esplanade retirés dans `city-geo.js` (k < 3).
 - **Arène Stickman** (`city-arena.js`, bouton 🎮) : Course de haies, Sumo, Balai ; 1 à 4 joueurs + robots ; tests `node city-arena_test.mjs`.
 - Vérifié dans Chromium (WebGL logiciel) ; non vérifié sur vrai téléphone, vrai serveur, vraie base. L'heure du jeu suit l'horloge réelle (la ville est sombre la nuit).
+
+## Lot 7 (arène en ligne, cinéma, lieux répartis, visite guidée)
+- **Mini-jeux multi-appareils** : `city-party-server.js` (salons en mémoire : invitation, acceptation, démarrage, relais hôte ↔ invités, limites de débit/taille, blocages et sourdine respectés) + `city-party.js` (client). L'hôte simule la manche et diffuse l'état ~15×/s, chaque invité n'envoie que sa touche. Plus de multi-joueur sur le même écran ; places libres = robots.
+- **Arène refaite d'après Stickman Party** (une touche par joueur, écran de règles, manches courtes) : Course de haies, Sumo, Balai + **Chars** (tourelle qui tourne, obus qui ricochent), **Football** (2 contre 2, sprint/tir), **Peinture** (virage à droite, coloriez le plus de cases). Logique pure testée (`city-arena_test.mjs`).
+- **Cinéma JexCity** (`city-cinema.js`, ouest de la Grande Avenue) : façade Art déco, marquise à ampoules, enseigne verticale, affiches, tapis rouge, hall (guichet, popcorn), salle à gradins (280 fauteuils), écran géant, rideaux. Guichet : coller l'adresse d'un film (YouTube / Vimeo / .mp4), regarder seul(e) ou inviter des amis (autres appareils) ; on marche jusqu'à sa place, on s'assoit (posture assise visible par les autres), le film se lance au-dessus de la scène ; toucher le sol ou « Se lever » pour se lever. Toit et murs translucides à l'intérieur.
+- **Lieux répartis** : parcelles réservées `G.LOTS` (cinéma, cafétéria, musée, supermarché ; le stade reste au sud) — plus aucun immeuble généré dessus. `G.FLOORS` : sols à hauteur variable.
+- **Voitures** : les mêmes voitures réalistes circulent dans les rues (avenue → rue nord → route du Château), dans les deux sens, et s'arrêtent devant vous (`city-props.js`).
+- **Carte** : rues, parcs, lac, immeubles colorés, lieux avec icônes, trajet en cours, liste « Lieux ouverts ».
+- **Heure** : ne suit plus l'horloge réelle (16 h 30 par défaut, réglable dans Réglages).
+- **Visite guidée** (`city-tour.js`) à la première connexion (par compte et appareil), rejouable avec ❔.
+- Tests : `npm run test:city` (2 anciens contrôles « canal » de `city-geo_test.mjs` échouent déjà dans la version d'origine : le canal n'existe plus). **Non vérifié** : rendu 3D réel (cinéma, arène), vrai Socket.IO, téléphone ; le film intégré dépend de l'autorisation d'intégration de l'hébergeur.

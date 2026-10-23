@@ -4,7 +4,7 @@ let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.error('ÉCHEC :', msg); } else console.log('ok   :', msg); };
 
 const L = G.buildLayout(7);
-ok(L.buildings.length > 100, `bâtiments générés (${L.buildings.length})`);
+ok(L.buildings.length > 60, `bâtiments générés (${L.buildings.length})`);
 ok(L.buildings.every((b) => !G.blockedByCanal(b.cx, b.cz)), 'aucun centre de bâtiment dans le canal');
 
 // aucun coin de bâtiment dans l'eau, aucun bâtiment hors de la zone

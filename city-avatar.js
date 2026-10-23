@@ -137,6 +137,7 @@ export function createAvatar({ colorA, colorB, name = '', look } = {}) {
   if (name) group.add(nameSprite(name));
 
   // Mouvement : cycle de marche réel (city-walk.js), rejoué à une cadence qui suit la vitesse réelle du personnage
+  let sit = 0, sitT = false; // posture assise (cinéma)
   let phase = 0, walk = 0, target = false, speed = 0, lastX = null, lastZ = 0;
   const rot = (o, x, y, z) => o.rotation.set(x, y ?? 0, z ?? 0);
   const N = WALK.n, CH = WALK.ch, K = 1.3;
@@ -144,6 +145,8 @@ export function createAvatar({ colorA, colorB, name = '', look } = {}) {
   return {
     group,
     setWalking(on) { target = !!on; },
+    setSeated(on) { sitT = !!on; },
+    get seated() { return sitT; },
     face(yaw, dt) { let d = yaw - group.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); group.rotation.y += d * Math.min(1, dt * 10); },
     update(dt, t) {
       const px = group.position.x, pz = group.position.z;
@@ -165,6 +168,12 @@ export function createAvatar({ colorA, colorB, name = '', look } = {}) {
       body.position.y = f('bob') * 1.3 * w - 0.012 * w;
       spine.scale.set(1, 1 + Math.sin(t * 1.8) * 0.006 * idle, 1 + Math.sin(t * 1.8) * 0.01 * idle);
       rot(headP, -0.03 * w + Math.sin(t * 0.7) * 0.02 * idle, Math.sin(t * 0.5) * 0.12 * idle, 0);
+      sit += ((sitT ? 1 : 0) - sit) * Math.min(1, dt * 7);
+      if (sit > 0.002) { // assis : cuisses à l'horizontale, genoux fléchis, bassin abaissé, bras posés
+        const k = sit; lR.hip.rotation.x = lR.hip.rotation.x * (1 - k) - 1.5 * k; lL.hip.rotation.x = lL.hip.rotation.x * (1 - k) - 1.5 * k;
+        lR.kn.rotation.x = lR.kn.rotation.x * (1 - k) + 1.5 * k; lL.kn.rotation.x = lL.kn.rotation.x * (1 - k) + 1.5 * k; lR.an.rotation.x *= (1 - k); lL.an.rotation.x *= (1 - k);
+        body.position.y -= 0.5 * k; aR.sh.rotation.x = aR.sh.rotation.x * (1 - k) - 0.55 * k; aL.sh.rotation.x = aL.sh.rotation.x * (1 - k) - 0.55 * k;
+      }
     },
   };
 }

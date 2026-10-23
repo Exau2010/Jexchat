@@ -10,7 +10,7 @@ import * as G from './city-geo.js';
 const s2l = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)); // les couleurs d'origine sont en sRGB
 export const COINS = 28;
 const VEHICLE_SET = ['truck-red', 'moto', 'truck-yellow', 'truck-green', 'truck-purple'];
-const PER_TIER = { low: { vehicles: 2, trees: 0, hero: false }, mid: { vehicles: 3, trees: 50, hero: true }, high: { vehicles: 5, trees: 90, hero: true } };
+const PER_TIER = { low: { vehicles: 2, trees: 0, hero: false, cars: 2 }, mid: { vehicles: 3, trees: 50, hero: true, cars: 4 }, high: { vehicles: 5, trees: 90, hero: true, cars: 7 } };
 
 function lcg(seed) { let a = seed >>> 0; return () => { a = (Math.imul(a, 1664525) + 1013904223) >>> 0; return a / 4294967296; }; }
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
@@ -65,6 +65,7 @@ export async function createProps({ scene, layout, tier, getPlayer, toast = () =
     const road = roads[i % roads.length], base = k === 'moto' ? 10 : 6.5 + (i % 3);
     return { mesh, road, s: (road.len * (0.15 + 0.3 * ((i * 0.37) % 1))), dir: i % 2 ? -1 : 1, base, cur: base, yaw: 0, moto: k === 'moto' };
   });
+  const traffic = []; // voitures de ville (remplies quand le modèle réaliste est chargé)
   const pitchAt = (road, s, dir) => { const a = roadAt(road, s - 1.4), b = roadAt(road, s + 1.4); return Math.atan2((G.groundY(b.x, b.z) - G.groundY(a.x, a.z)) * dir, 2.8); };
   function updateVehicles(dt, cam, pl) {
     vehicles.forEach((v, i) => {
@@ -79,6 +80,20 @@ export async function createProps({ scene, layout, tier, getPlayer, toast = () =
     });
   }
 
+  function updateTraffic(dt, cam, pl) {
+    const n = level.cars ?? 4;
+    traffic.forEach((v, i) => {
+      if (i >= n) { v.mesh.visible = false; return; }
+      const p = roadAt(v.road, v.s), dPl = pl ? Math.hypot(pl.x - p.x, pl.z - p.z) : 99;
+      const target = dPl < 10 ? 0 : v.base; v.cur += (target - v.cur) * Math.min(1, dt * (target ? 1 : 3)); // s'arrête devant vous
+      v.s += v.dir * v.cur * dt; if (v.s >= v.road.len - 1) v.s = 1; else if (v.s <= 1) v.s = v.road.len - 1; // la voiture réapparaît au départ (hors champ)
+      const q = roadAt(v.road, v.s), near = Math.hypot(cam.x - q.x, cam.z - q.z) < 240; v.mesh.visible = near; if (!near) return;
+      const fx = q.dx * v.dir, fz = q.dz * v.dir, x = q.x - fz * 3.4, z = q.z + fx * 3.4;
+      let d = Math.atan2(fx, fz) - v.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); v.yaw += d * Math.min(1, dt * 3);
+      v.mesh.position.set(x, G.groundY(x, z) + 0.04, z); v.mesh.rotation.set(-pitchAt(v.road, v.s, v.dir), v.yaw, 0);
+    });
+  }
+
   // ── Voiture réaliste (matériaux PBR, 27 000 triangles, textures WebP ≤ 1024) : modèle CC0 « Free concept car » via Khronos, allégé avec Blender ──
   // Chargée à part, après le reste : si elle échoue, tout le décor fonctionne quand même.
   const carReady = (async () => {
@@ -89,6 +104,13 @@ export async function createProps({ scene, layout, tier, getPlayer, toast = () =
       model.traverse((o) => { if (o.isMesh && o.material) { o.material.envMapIntensity = 1.0; } });
       const wrap = new THREE.Group(); wrap.rotation.order = 'YXZ'; wrap.visible = false; wrap.add(model); root.add(wrap);
       const road = roads[0]; vehicles.push({ mesh: wrap, road, s: road.len * 0.55, dir: -1, base: 10.5, cur: 10.5, yaw: 0, moto: false, hero: true });
+      // Circulation en ville : les MÊMES voitures roulent dans les rues (Grande Avenue → rue du nord → route du Château), dans les deux sens, à droite.
+      const route = makeRoad([[0, 128], [0, -96], [112, -96], [112, -60], ...G.ROADS[0].pts.slice(1)]);
+      const N = 7;
+      for (let k = 0; k < N; k++) {
+        const w = new THREE.Group(); w.rotation.order = 'YXZ'; w.visible = false; w.add(model.clone()); root.add(w);
+        traffic.push({ mesh: w, road: route, s: (route.len * (k + 0.5)) / N, dir: k % 2 ? -1 : 1, base: 9 + (k % 3) * 1.6, cur: 9, yaw: 0, hero: true, rank: k });
+      }
     } catch (e) { console.warn('[JexCity] voiture réaliste indisponible', e); }
   })();
 
@@ -138,7 +160,7 @@ export async function createProps({ scene, layout, tier, getPlayer, toast = () =
   if (!localStorage.getItem('jexcity.coins.intro')) { setTimeout(() => toast(`🪙 ${COINS} pièces sont cachées en ville et sur les collines. Elles reviennent chaque jour !`), 5000); try { localStorage.setItem('jexcity.coins.intro', '1'); } catch (_) { /* ignoré */ } }
 
   return {
-    update(dt, t, cam) { const pl = getPlayer?.(); updateVehicles(dt, cam, pl); updateCoins(t, cam, pl); },
+    update(dt, t, cam) { const pl = getPlayer?.(); updateVehicles(dt, cam, pl); updateTraffic(dt, cam, pl); updateCoins(t, cam, pl); },
     setTier(t) { level = PER_TIER[t.name] || PER_TIER.mid; applyTrees(); },
     coins: { total: COINS, got, spots }, vehicles, root, carReady,
   };

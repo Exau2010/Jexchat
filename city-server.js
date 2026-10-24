@@ -73,7 +73,7 @@ function getMuteModel() {
 // Tous les fichiers JexCity sont à la racine du projet. Liste blanche explicite : on ne sert JAMAIS
 // la racine entière (server.js, database.js, .env… resteraient exposés).
 const CITY_FILES = ['city.css', 'city-main.js', 'city-api.js', 'city-social.js', 'city-posts.js', 'city-ui.js',
-  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js', 'city-modern.js', 'city-walk.js', 'city-props.js', 'city-arena.js', 'city-venues.js', 'city-party.js', 'city-cinema.js', 'city-tour.js'];
+  'city-geo.js', 'city-textures.js', 'city-world.js', 'city-controls.js', 'city-avatar.js', 'city-media.js', 'city-games.js', 'city-look.js', 'city-solo.js', 'city-models.js', 'city-modern.js', 'city-walk.js', 'city-props.js', 'city-arena.js', 'city-venues.js', 'city-party.js', 'city-cinema.js', 'city-tour.js', 'city-drive.js'];
 
 // Three.js r160 (MIT) servi localement depuis la racine : plus de dépendance à un CDN. Liste blanche, version figée.
 const VENDOR_FILES = ['three.module.min.js', 'GLTFLoader.js', 'BufferGeometryUtils.js'];
@@ -148,7 +148,7 @@ function mountStatic(app) {
   // CSP propre à la page JexCity uniquement (JexChat inchangé) : three.js/GLTFLoader décodent les textures intégrées aux
   // fichiers .glb via des URL « blob: ». Sans cette autorisation, arbres, station et voiture restaient BLANCS.
   // Décor Kenney (camions, moto, arbres de bord de route, pièces) et voiture réaliste : fichiers à la racine, liste blanche.
-  for (const f of ['city-props.glb', 'city-car.glb']) {
+  for (const f of ['city-props.glb', 'city-car.glb', 'city-vehicles.glb', 'city-truck.glb']) {
     app.get('/' + f, (req, res) => { res.setHeader('Cache-Control', 'public, max-age=86400'); res.sendFile(path.join(CITY_DIR, f), (err) => { if (err && !res.headersSent) res.status(404).end(); }); });
   }
   const page = (req, res) => {

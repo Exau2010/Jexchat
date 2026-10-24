@@ -106,7 +106,7 @@ async function boot() {
   const presentPlayers = () => [...social.remotes.values()].map((r) => ({ id: r.id, username: r.user.username }));
   const posts = createPosts({ world, pickables, layout });
 
-  let ui, games, venues = null; let mood = '';
+  let ui, games, venues = null, drive = null; let mood = '';
   const walkPath = (pts) => { // trajet à étapes (portes, allées) : chaque étape est annoncée aux autres joueurs pour qu'ils suivent le même chemin
     if (!pts.length) return; player.path = pts.map((p) => [p[0], p[1]]); player.stuck = 0; player.dest = pts[pts.length - 1];
     social.emitMove(player.x, player.z, pts[0][0], pts[0][1]); $('#hint').style.opacity = 0;
@@ -128,6 +128,7 @@ async function boot() {
       if (kind === 'avatar') { const r = social.remotes.get(hit.object.userData.userId); if (r) ui.showUser({ ...r.user, id: r.id }); }
       else if (kind === 'boat') { const p = posts.select(hit.object.userData.index); if (p) ui.showPost(p, () => posts.release()); }
       else if (kind === 'board') { const p = posts.selectBoard(hit.object.userData.index); if (p) ui.showPost(p); }
+      else if (kind === 'car') { if (!drive?.tapCar(hit.object.userData.car)) walkTo(hit.point.x, hit.point.z); }
       else if (kind === 'seat') { if (cinema) cinema.pickSeat(hit.instanceId); }
       else if (kind === 'venue') { const u = hit.object.userData; if (u.venue === 'cinema') cinema?.open('cinema', u); else if (u.venue === 'floor') walkTo(hit.point.x, hit.point.z); else venues?.open(u.venue); }
       else walkTo(hit.point.x, hit.point.z); // façade : on rejoint le point libre le plus proche
@@ -154,7 +155,7 @@ async function boot() {
   games = createGamesClient({ socket, me, h, toast: (m) => ui.toast(m) });
   socket.on('game:state', () => solo.close()); // une partie multijoueur qui démarre remplace le jeu solo
   const solo = createSolo({ h, toast: (m) => ui.toast(m) });
-  function setTier(t) { tier = t; world.setTier(t); applySize(); }
+  function setTier(t) { tier = t; world.setTier(t); drive?.setTier(t); applySize(); }
 
   // L'heure du jeu NE suit PLUS l'horloge réelle : fin d'après-midi lumineuse par défaut (réglable à la main dans Réglages).
   world.setHour(16.5);
@@ -181,6 +182,10 @@ async function boot() {
       emitMove: (x, z, tx, tz) => social.emitMove(x, z, tx, tz) });
   }).catch((e) => console.warn('Cinéma indisponible :', e && e.message));
   setTimeout(() => world.attachProps({ getPlayer: () => player, toast: (m) => ui.toast(m) }), 3500); // décor roulant + pièces, après le premier affichage
+  // Voitures garées, palmiers et conduite (city-drive.js) : chargé en arrière-plan, comme le décor ; un échec ne change rien au reste.
+  setTimeout(() => import('./city-drive.js').then((m) => m.createDrive({ scene, root: world.root, layout, pickables, tier, player, controls, social, hud: $('#hud'),
+    setAvatarVisible: (on) => { av.group.visible = on; }, getBusy: () => !!games?.active, toast: (x) => ui.toast(x) })).then((d) => { drive = d; if (window.__jexcity) window.__jexcity.drive = d; })
+    .catch((e) => console.warn('Conduite indisponible :', e && e.message)), 4200);
   const connectJoin = () => social.join(mood);
   if (socket.connected) connectJoin(); else socket.once('connect', connectJoin);
   const loadPosts = () => api.latestPosts(Math.min(30, posts.capacity)).then((p) => posts.assign(p)).catch(() => {});
@@ -192,7 +197,7 @@ async function boot() {
     if (!running) return;
     const dt = Math.min(clock.getDelta(), 0.05); t += dt;
     // déplacement
-    if (player.path.length && !player.sitting) {
+    if (player.path.length && !player.sitting && !drive?.active) {
       const [wx, wz] = player.path[0], dx = wx - player.x, dz = wz - player.z, d = Math.hypot(dx, dz);
       if (d < 0.25) { player.path.shift(); if (player.path.length) social.emitMove(player.x, player.z, player.path[0][0], player.path[0][1]); }
       else {
@@ -202,7 +207,8 @@ async function boot() {
       }
       if (!player.path.length) { social.emitMove(player.x, player.z, player.x, player.z); player.dest = null; }
     }
-    av.setWalking(player.path.length > 0);
+    drive?.update(dt); if (drive?.active) av.group.visible = false;
+    av.setWalking(player.path.length > 0 && !drive?.active);
     posV.set(player.x, G.groundY(player.x, player.z), player.z); av.group.position.copy(posV); av.update(dt, t);
     if (marker.material.opacity > 0) { marker.material.opacity = player.dest ? 0.85 : Math.max(0, marker.material.opacity - dt * 2); marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08); }
     controls.update(dt, posV);

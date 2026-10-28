@@ -62,9 +62,15 @@ async function callModel(system, messages, signal) {
   const key = apiKey();
   const envModel = process.env.JEXAI_MODEL || '';
   const model = /^(mistral|open-mistral|open-mixtral|ministral|magistral|codestral|pixtral)/i.test(envModel) ? envModel : 'mistral-small-latest';
-  const r = await fetch('https://api.mistral.ai/v1/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + key },
+  const call = () => fetch('https://api.mistral.ai/v1/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + key },
     body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'system', content: system }, ...messages] }) });
-  if (!r.ok) { const e = new Error('upstream'); e.status = r.status; throw e; }
+  let r = await call();
+  if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 1200)); r = await call(); } // limite de débit : un seul nouvel essai
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    console.error('[JexAi] Mistral', r.status, t.slice(0, 300).replace(/Bearer\s+\S+/gi, '')); // motif exact, jamais la clé
+    const e = new Error('upstream'); e.status = r.status; throw e;
+  }
   const j = await r.json();
   const c = j.choices?.[0]?.message?.content;
   return Array.isArray(c) ? c.filter((b) => b.type === 'text').map((b) => b.text).join('') : (c || '');

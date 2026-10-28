@@ -1115,7 +1115,10 @@ function sfApply(n, e) {
   s.fontSize = sfU(e.size); s.color = e.color; s.fontWeight = e.weight;
   s.fontStyle = e.italic ? 'italic' : 'normal'; s.textDecoration = e.ul ? 'underline' : 'none';
   s.textAlign = e.align; s.letterSpacing = sfU(e.ls); s.lineHeight = e.lh;
-  s.textShadow = !box && i > 0 ? `0 ${sfU(0.4 * i)} ${sfU(1.8 * i)} rgba(0,0,0,${(0.25 + 0.7 * i).toFixed(2)})` : 'none';
+  s.webkitTextStroke = ''; s.paintOrder = '';
+  if (e.fx === 'outline') { s.webkitTextStroke = `${sfU(0.25)} ${e.color}`; s.color = 'transparent'; }
+  const fxShadow = e.fx === 'shadow' ? `${sfU(0.3)} ${sfU(0.3)} ${sfU(0.8)} rgba(0,0,0,.85)` : e.fx === 'neon' ? `0 0 ${sfU(1)} ${e.color},0 0 ${sfU(2.4)} ${e.color},0 0 ${sfU(4.5)} ${e.color}` : e.fx === 'glitch' ? `${sfU(-0.35)} 0 #ff2d55,${sfU(0.35)} 0 #00e5ff` : '';
+  s.textShadow = fxShadow ? fxShadow : !box && i > 0 ? `0 ${sfU(0.4 * i)} ${sfU(1.8 * i)} rgba(0,0,0,${(0.25 + 0.7 * i).toFixed(2)})` : 'none';
 }
 function sfMediaEl(type, url, o = {}) {
   const vi = type === 'video' ? jxVideoInfo(url) : null;
@@ -1526,7 +1529,7 @@ stEl('story-submit').addEventListener('click', async () => {
     mediaType,
     content: texts.map((e) => e.text.trim()).join(' ').slice(0, 300),
     mediaUrl,
-    layout: { v: 1, bgi: sted.bgi, elements },
+    layout: { v: 1, bgi: sted.bgi, elements, ...(sted.dur ? { dur: sted.dur } : {}) },
   };
   const btn = stEl('story-submit'); btn.disabled = true;
   try {
@@ -1627,7 +1630,7 @@ function svRender(body, story) {
   // Image : durée un peu plus longue que le texte ; vidéo/audio : leur durée réelle ; lecteur intégré : durée fixe longue.
   const ready = () => {
     if (sv.media !== media || sv.ready) return;
-    if (tag === 'IMG') sv.dur = 7000;
+    if (tag === 'IMG') sv.dur = (story.layout && story.layout.dur ? story.layout.dur * 1000 : 7000);
     else if (tag === 'IFRAME') sv.dur = 15000; // YouTube/Vimeo : durée inconnue sans leur API
     sv.last = performance.now();
     sv.ready = true;
@@ -1656,6 +1659,7 @@ function playStory(index) {
   sv.bar = bars[index].querySelector('i');
   sv.bar.style.transition = 'none';
   svRender(body, story);
+  if (story.layout && story.layout.dur) sv.dur = story.layout.dur * 1000;
 
   const viewsBar = document.getElementById('sv-viewsbar');
   if (group.author.id === state.me.id) {

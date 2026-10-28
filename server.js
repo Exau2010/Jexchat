@@ -103,7 +103,7 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,
@@ -126,6 +126,9 @@ const jexcity = require('./city-server.js');
 jexcity.mountStatic(app);
 
 app.use(sec.apiLimiter);
+
+// JexAi (module additif) : POST /api/jexai, GET /api/jexai/status
+require('./jexai.js').mount(app, sec);
 
 // Remarque : style.css et script.js (ancienne interface) restent servis
 // tels quels ci-dessus car admin.html et informations.html en dépendent
@@ -1386,6 +1389,7 @@ function sanitizeStoryLayout(raw, hasMedia) {
       Object.assign(e, {
         text, font: slPick(r.font, SL_FONTS, 'inter'), size: slNum(r.size, 2, 30, 6), color: slHex(r.color, '#ffffff'),
         weight: slPick(Number(r.weight), SL_WEIGHTS, 700), italic: r.italic === true, ul: r.ul === true,
+        fx: slPick(r.fx, ['none', 'shadow', 'outline', 'neon', 'glitch'], 'none'),
         align: slPick(r.align, SL_ALIGN, 'center'), ls: slNum(r.ls, -0.5, 3, 0), lh: slNum(r.lh, 0.8, 2.5, 1.3),
       });
     }
@@ -1395,7 +1399,10 @@ function sanitizeStoryLayout(raw, hasMedia) {
   // Z normalisé en 1..n (ordre des calques conservé)
   out.map((e, i) => ({ e, i })).sort((a, b) => a.e.z - b.e.z || a.i - b.i).forEach((o, k) => { o.e.z = k + 1; });
   const bgi = Number.isInteger(raw.bgi) && raw.bgi >= 0 && raw.bgi <= 15 ? raw.bgi : null;
-  return bgi === null ? { v: 1, elements: out } : { v: 1, bgi, elements: out };
+  const dur = slNum(raw.dur, 3, 30, 0);
+  const base = bgi === null ? { v: 1, elements: out } : { v: 1, bgi, elements: out };
+  if (dur) base.dur = dur;
+  return base;
 }
 
 function safeStory(story, viewerId, isMine) {

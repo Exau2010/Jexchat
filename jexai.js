@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const MAX_MSGS = 20, MAX_CHARS = 4000, MAX_TOTAL = 16000, TIMEOUT_MS = 45000;
+const MAX_MSGS = 20, MAX_CHARS = 4000, MAX_TOTAL = 16000, TIMEOUT_MS = 30000;
 const ADMIN_TTL = 30 * 60 * 1000;
 const adminSessions = new Map(); // userId -> expiration
 
@@ -56,18 +56,24 @@ function mapError(status) {
 
 const apiKey = () => (process.env.JEXAI || process.env.JEXAI_API_KEY || '').trim();
 async function callModel(system, messages, signal) {
-  // Google Gemini (endpoint compatible OpenAI) : auth « Bearer <clé AI Studio> ».
-  // JEXAI_MODEL n'est repris que s'il s'agit d'un modèle Gemini ; sinon alias « gemini-flash-latest ».
+  // Google Gemini (endpoint compatible OpenAI), modèle « lite » : le plus rapide, sans phase de réflexion.
+  // JEXAI_MODEL n'est repris que s'il s'agit d'un modèle Gemini ; sinon alias « gemini-flash-lite-latest ».
   const key = apiKey();
   const envModel = process.env.JEXAI_MODEL || '';
-  const model = /^gemini-/i.test(envModel) ? envModel : 'gemini-flash-latest';
-  const call = () => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-    body: JSON.stringify({ model, max_tokens: 2048, messages: [{ role: 'system', content: system }, ...messages] }) });
-  let r = await call();
-  if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 1500)); r = await call(); } // limite de débit : un seul nouvel essai
+  const models = /^gemini-/i.test(envModel) ? [envModel] : ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+  const t0 = Date.now();
+  let r, model;
+  for (const m of models) { // repli sur le modèle suivant seulement si le nom est inconnu (404)
+    model = m;
+    const call = () => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ model: m, max_tokens: 1024, messages: [{ role: 'system', content: system }, ...messages] }) });
+    r = await call();
+    if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 1500)); r = await call(); } // limite de débit : un seul nouvel essai
+    if (r.status !== 404) break;
+  }
   if (!r.ok) {
     const t = await r.text().catch(() => '');
-    console.error('[JexAi] Gemini', r.status, `modèle=${model} clé=${key.length}car. finissant par …${key.slice(-4)}`, t.slice(0, 300).replace(/Bearer\s+\S+/gi, '').replace(/AIza[\w-]+/g, '[clé]')); // motif exact, jamais la clé
+    console.error('[JexAi] Gemini', r.status, `modèle=${model} ${Date.now() - t0}ms clé=${key.length}car. finissant par …${key.slice(-4)}`, t.slice(0, 300).replace(/Bearer\s+\S+/gi, '').replace(/AIza[\w-]+/g, '[clé]')); // motif exact, jamais la clé
     const e = new Error('upstream'); e.status = r.status; throw e;
   }
   const j = await r.json();

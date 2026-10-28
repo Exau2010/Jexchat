@@ -2739,6 +2739,56 @@ function resetSession() {
   renderNotifBadge();
 }
 
+/* ================= Images de discussion (Supabase via le serveur) ================= */
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const btn = $('imgBtn'), file = $('imgFile'), prev = $('imgprev'), img = $('imgprevImg'), txt = $('imgprevTxt');
+  const prog = $('imgprog'), bar = $('imgprogBar'), sendB = $('imgprevSend'), cancelB = $('imgprevCancel');
+  if (!btn || !file) return;
+  const MAX = 5 * 1024 * 1024, OK = ['image/jpeg', 'image/png', 'image/webp'];
+  let blob = null, busy = false, objUrl = null;
+  const reset = () => { if (objUrl) URL.revokeObjectURL(objUrl); objUrl = null; blob = null; busy = false; file.value = ''; prev.classList.add('hidden'); prog.classList.add('hidden'); bar.style.width = '0'; sendB.disabled = false; cancelB.disabled = false; };
+  // Réduit à 1600 px max et recompresse (WebP, sinon JPEG) pour un envoi léger ; repli sur l'original si impossible.
+  async function compress(f) {
+    try {
+      const bmp = await createImageBitmap(f);
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const out = await new Promise((r) => c.toBlob(r, 'image/webp', 0.82)) || await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
+      return out && out.size < f.size ? out : f;
+    } catch (_) { return f; }
+  }
+  btn.addEventListener('click', () => { if (state.currentConvId && !busy) file.click(); });
+  file.addEventListener('change', async () => {
+    const f = file.files && file.files[0]; if (!f) return;
+    if (!OK.includes(f.type)) { toast('Format non autorisé (JPEG, PNG ou WebP).'); reset(); return; }
+    blob = await compress(f);
+    if (blob.size > MAX) { toast('Image trop lourde (5 Mo max).'); reset(); return; }
+    objUrl = URL.createObjectURL(blob); img.src = objUrl; txt.textContent = f.name + ' · ' + Math.max(1, Math.round(blob.size / 1024)) + ' Ko';
+    prev.classList.remove('hidden');
+  });
+  cancelB.addEventListener('click', () => { if (!busy) reset(); });
+  sendB.addEventListener('click', () => {
+    if (!blob || busy || !state.currentConvId) return;
+    busy = true; sendB.disabled = true; cancelB.disabled = true; prog.classList.remove('hidden');
+    const convId = state.currentConvId, xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/conversations/${convId}/images`);
+    xhr.withCredentials = true; xhr.setRequestHeader('Content-Type', blob.type || 'image/webp');
+    if (state.token) xhr.setRequestHeader('X-Session-Token', state.token);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) bar.style.width = Math.round(e.loaded / e.total * 90) + '%'; };
+    const fail = (m) => { toast(m); busy = false; sendB.disabled = false; cancelB.disabled = false; prog.classList.add('hidden'); bar.style.width = '0'; };
+    xhr.onerror = () => fail('Connexion perdue, réessayez.');
+    xhr.onload = async () => {
+      let d = {}; try { d = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status !== 201) return fail(d.error || 'Échec de l’envoi de l’image.');
+      try { bar.style.width = '100%'; await api('POST', `/api/conversations/${convId}/messages`, { content: '', type: 'image', imageId: d.imageId }); reset(); }
+      catch (e) { fail(e.message); }
+    };
+    xhr.send(blob);
+  });
+})();
+
 /* ================= Init ================= */
 paintIcons();
 tryResumeSession();

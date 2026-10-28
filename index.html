@@ -92,8 +92,11 @@
     <div class="thread" id="thread"></div>
     <div class="typing" id="typing"></div>
     <div class="replybar hidden" id="replybar"><span id="replytxt"></span><button class="tapbtn" id="replyclose"><i data-ic="x"></i></button></div>
+    <div class="imgprev hidden" id="imgprev"><img id="imgprevImg" alt=""><span id="imgprevTxt"></span><div class="imgprog hidden" id="imgprog"><i id="imgprogBar"></i></div><button class="tapbtn" id="imgprevCancel" aria-label="Annuler"><i data-ic="x"></i></button><button class="btn sm primary" id="imgprevSend">Envoyer</button></div>
     <div class="chat-input">
       <button class="tapbtn" aria-label="Joindre" id="attach"><i data-ic="plus"></i></button>
+      <button class="tapbtn" aria-label="Envoyer une image" id="imgBtn"><i data-ic="image"></i></button>
+      <input type="file" id="imgFile" accept="image/jpeg,image/png,image/webp" hidden>
       <input id="msgInput" placeholder="Message" maxlength="2000" autocomplete="off">
       <button class="tapbtn sendbtn" aria-label="Envoyer" id="sendBtn"><i data-ic="send"></i></button>
     </div>

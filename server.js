@@ -13,6 +13,7 @@ const bcrypt = require('bcryptjs');
 
 const db = require('./database.js');
 const sec = require('./security.js');
+const chatMedia = require('./chat-media.js');
 
 const app = express();
 // Render (et tout hébergeur derrière un reverse proxy) : sans ceci, req.ip est l'IP du proxy,
@@ -893,11 +894,17 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
     let safeContent = '';
     let safeUrl = '';
     let safeSharedPostId = null;
+    let imageClaim = null;
 
     if (msgType === 'text') {
       const contentResult = sec.validateMessage(content);
       if (!contentResult.valid) return res.status(400).json({ error: contentResult.error });
       safeContent = contentResult.value;
+    } else if (msgType === 'image' && req.body.imageId) {
+      imageClaim = await chatMedia.claim(req.body.imageId, req.user._id, req.params.id);
+      if (!imageClaim) return res.status(410).json({ error: 'Image expirée ou invalide.' });
+      safeUrl = chatMedia.urlFor(imageClaim._id);
+      safeContent = sec.sanitizeText(content || '').substring(0, 200);
     } else if (['image', 'video', 'audio', 'link', 'sticker'].includes(msgType)) {
       const urlResult = sec.validateUrl(url || content);
       if (!urlResult.valid) return res.status(400).json({ error: urlResult.error });
@@ -947,8 +954,10 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
         const again = await db.getMessageByClientId(req.user._id, clientId);
         if (again) return res.status(200).json(safeMessage(again));
       }
+      if (imageClaim) await chatMedia.release(imageClaim._id).catch(() => {});
       throw e;
     }
+    if (imageClaim) await chatMedia.attach(imageClaim._id, message._id);
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
     await db.updateConversationLastMessage(req.params.id, {
       content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
@@ -1048,6 +1057,7 @@ app.delete('/api/messages/:id', sec.requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Accès non autorisé.' });
     }
     await db.deleteMessage(req.params.id);
+    if (message.type === 'image') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
     for (const m of conv.members) {
       io.to(`user:${m.toString()}`).emit('message_deleted', { messageId: req.params.id, conversationId: message.conversationId });
     }
@@ -1856,6 +1866,7 @@ app.delete('/api/admin/messages/:id', ...adminAuth, async (req, res) => {
     const message = await db.getMessageById(req.params.id);
     if (!message) return res.status(404).json({ error: 'Message introuvable.' });
     await db.deleteMessage(req.params.id);
+    if (message.type === 'image') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
     const conv = await db.getConversationById(message.conversationId);
     if (conv) {
       for (const m of conv.members) {
@@ -2123,6 +2134,8 @@ async function enrichConversations(convs, currentUserId) {
   }
   return results;
 }
+
+chatMedia.mount(app, sec, io, db);
 
 // ─── Cleanup Jobs ──────────────────────────────────────────────────────────────
 setInterval(async () => {

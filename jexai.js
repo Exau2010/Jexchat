@@ -56,19 +56,18 @@ function mapError(status) {
 
 const apiKey = () => (process.env.JEXAI || process.env.JEXAI_API_KEY || '').trim();
 async function callModel(system, messages, signal) {
-  // Mistral (API compatible OpenAI) : https://api.mistral.ai/v1/chat/completions, auth « Bearer ».
-  // L'URL est fixe et le modèle n'est repris de JEXAI_MODEL que s'il s'agit d'un modèle Mistral
-  // (évite qu'une ancienne variable Anthropic/NVIDIA casse l'appel).
+  // Google Gemini (endpoint compatible OpenAI) : auth « Bearer <clé AI Studio> ».
+  // JEXAI_MODEL n'est repris que s'il s'agit d'un modèle Gemini ; sinon alias « gemini-flash-latest ».
   const key = apiKey();
   const envModel = process.env.JEXAI_MODEL || '';
-  const model = /^(mistral|open-mistral|open-mixtral|ministral|magistral|codestral|pixtral)/i.test(envModel) ? envModel : 'mistral-small-latest';
-  const call = () => fetch('https://api.mistral.ai/v1/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + key },
-    body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'system', content: system }, ...messages] }) });
+  const model = /^gemini-/i.test(envModel) ? envModel : 'gemini-flash-latest';
+  const call = () => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    body: JSON.stringify({ model, max_tokens: 2048, messages: [{ role: 'system', content: system }, ...messages] }) });
   let r = await call();
-  if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 1200)); r = await call(); } // limite de débit : un seul nouvel essai
+  if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 1500)); r = await call(); } // limite de débit : un seul nouvel essai
   if (!r.ok) {
     const t = await r.text().catch(() => '');
-    console.error('[JexAi] Mistral', r.status, t.slice(0, 300).replace(/Bearer\s+\S+/gi, '')); // motif exact, jamais la clé
+    console.error('[JexAi] Gemini', r.status, `modèle=${model} clé=${key.length}car. finissant par …${key.slice(-4)}`, t.slice(0, 300).replace(/Bearer\s+\S+/gi, '').replace(/AIza[\w-]+/g, '[clé]')); // motif exact, jamais la clé
     const e = new Error('upstream'); e.status = r.status; throw e;
   }
   const j = await r.json();

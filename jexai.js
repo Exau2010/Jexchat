@@ -54,25 +54,20 @@ function mapError(status) {
   return 'JexAi est momentanément indisponible. Réessayez dans un instant.';
 }
 
-const apiKey = () => process.env.JEXAI || process.env.JEXAI_API_KEY || '';
+const apiKey = () => (process.env.JEXAI || process.env.JEXAI_API_KEY || '').trim();
 async function callModel(system, messages, signal) {
+  // Mistral (API compatible OpenAI) : https://api.mistral.ai/v1/chat/completions, auth « Bearer ».
+  // L'URL est fixe et le modèle n'est repris de JEXAI_MODEL que s'il s'agit d'un modèle Mistral
+  // (évite qu'une ancienne variable Anthropic/NVIDIA casse l'appel).
   const key = apiKey();
-  const provider = (process.env.JEXAI_PROVIDER || (/^sk-ant-/.test(key) ? 'anthropic' : /^sk-/.test(key) ? 'openai' : 'anthropic')).toLowerCase();
-  const model = process.env.JEXAI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'claude-sonnet-5-5');
-  if (provider === 'openai') {
-    const url = (process.env.JEXAI_API_URL || 'https://api.openai.com/v1') + '/chat/completions';
-    const r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-      body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'system', content: system }, ...messages] }) });
-    if (!r.ok) { const e = new Error('upstream'); e.status = r.status; throw e; }
-    const j = await r.json();
-    return j.choices?.[0]?.message?.content || '';
-  }
-  const url = (process.env.JEXAI_API_URL || 'https://api.anthropic.com') + '/v1/messages';
-  const r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model, max_tokens: 1200, system, messages }) });
+  const envModel = process.env.JEXAI_MODEL || '';
+  const model = /^(mistral|open-mistral|open-mixtral|ministral|magistral|codestral|pixtral)/i.test(envModel) ? envModel : 'mistral-small-latest';
+  const r = await fetch('https://api.mistral.ai/v1/chat/completions', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + key },
+    body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'system', content: system }, ...messages] }) });
   if (!r.ok) { const e = new Error('upstream'); e.status = r.status; throw e; }
   const j = await r.json();
-  return (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const c = j.choices?.[0]?.message?.content;
+  return Array.isArray(c) ? c.filter((b) => b.type === 'text').map((b) => b.text).join('') : (c || '');
 }
 
 function mount(app, sec) {

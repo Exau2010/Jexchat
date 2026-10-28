@@ -1,11 +1,11 @@
 'use strict';
-// Images de discussion : fichiers dans Supabase Storage (bucket privé « chat-media »),
+// Images de discussion : fichiers dans Supabase Storage (bucket privé « jexchatmedia »),
 // métadonnées dans MongoDB. 5 images actives max par conversation, expiration 10 min.
 // Module additif : monté depuis server.js, n'altère aucun autre système.
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 
-const BUCKET = 'chat-media';
+const BUCKET = 'jexchatmedia';
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ACTIVE = 5;
 const TTL_MS = 10 * 60 * 1000;

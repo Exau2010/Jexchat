@@ -229,6 +229,8 @@ function show(id) {
   document.getElementById('bottomnav').style.display = hideChrome ? 'none' : '';
   document.getElementById('sidebar').style.display = hideChrome ? 'none' : '';
   document.getElementById('rightpanel').style.display = isAuthFlow ? 'none' : '';
+  document.getElementById('rightpanel').dataset.view = id;
+  document.body.dataset.view = id;
   window.scrollTo(0, 0);
   routeEnter(id);
 }
@@ -1757,10 +1759,36 @@ function renderSiteCards() {
 }
 function renderTile(p) {
   const btn = document.createElement('button');
-  btn.className = 'tile' + (p.mediaType === 'image' ? '' : ' text');
-  btn.setAttribute('aria-label', 'Publication');
-  if (p.mediaType === 'image') btn.innerHTML = `<img src="${escText(p.mediaUrl)}" loading="lazy" alt="">`;
-  else btn.textContent = (p.content || '(sans texte)').slice(0, 80);
+  const kind = p.mediaType === 'image' || p.mediaType === 'video' || p.mediaType === 'link' ? p.mediaType : 'text';
+  btn.className = 'tile ' + (kind === 'text' ? 'text' : 'media ' + kind);
+  btn.type = 'button';
+  const label = (p.content || p.description || '').trim();
+  btn.setAttribute('aria-label', label ? 'Publication : ' + label.slice(0, 60) : 'Publication');
+  const unavailable = () => {
+    btn.classList.add('unavailable');
+    btn.innerHTML = `<span class="tile-na">${icon(kind === 'video' ? 'video' : 'image', 22)}<small>Média indisponible</small></span>`;
+  };
+  if (kind === 'image' && p.mediaUrl) {
+    btn.innerHTML = `<img src="${escText(p.mediaUrl)}" loading="lazy" alt="" referrerpolicy="no-referrer">`;
+    btn.querySelector('img').addEventListener('error', unavailable, { once: true });
+  } else if (kind === 'video' && p.mediaUrl) {
+    let v = { type: 'embed' };
+    try { v = jxVideoInfo(p.mediaUrl); } catch (_) {}
+    if (v.type === 'direct') {
+      btn.innerHTML = `<video src="${escText(jxDirectUrl(p.mediaUrl))}#t=0.1" preload="metadata" muted playsinline tabindex="-1"></video><span class="tile-badge">${icon('video', 16)}</span>`;
+      btn.querySelector('video').addEventListener('error', unavailable, { once: true });
+    } else {
+      btn.innerHTML = `<span class="tile-na tile-vid">${icon('video', 24)}<small>Vidéo</small></span>`;
+    }
+  } else if (kind === 'link' && p.mediaUrl) {
+    let host = '';
+    try { host = new URL(p.mediaUrl).hostname.replace(/^www\./, ''); } catch (_) {}
+    btn.innerHTML = `<span class="tile-na tile-lnk">${icon('link', 22)}<small>${escText(label.slice(0, 60) || host || 'Lien')}</small></span>`;
+  } else if (label) {
+    btn.textContent = label.slice(0, 120);
+  } else {
+    unavailable();
+  }
   btn.addEventListener('click', () => openPostDetail(p.id));
   return btn;
 }
@@ -1787,7 +1815,7 @@ function highlightText(text, q) {
   return qe ? esc.replace(new RegExp(qe, 'gi'), (m) => `<mark>${m}</mark>`) : esc;
 }
 function postResultHtml(p, q) {
-  const text = (p.content || p.description || '').slice(0, 160) || '(sans texte)';
+  const text = (p.content || p.description || '').slice(0, 160) || (p.mediaType === 'video' ? 'Vidéo' : p.mediaType === 'link' ? (p.mediaUrl || 'Lien') : p.mediaType === 'image' ? 'Photo' : 'Publication');
   const thumb = p.mediaType === 'image' && /^https:\/\//i.test(p.mediaUrl || '')
     ? `<img src="${escText(p.mediaUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
     : icon(p.mediaType === 'video' ? 'video' : p.mediaType === 'link' ? 'link' : 'msg', 20);

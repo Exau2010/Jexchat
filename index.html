@@ -31,7 +31,7 @@
   <button class="navbtn off" data-nav="notifs" style="position:relative"><span class="badge hidden" data-notifbadge></span><i data-ic="bell"></i><span class="label">Notifications</span></button>
   <button class="navbtn off" data-nav="profile"><i data-ic="user"></i><span class="label">Profil</span></button>
   <a class="navbtn off" href="/city" id="nav-jexcity" style="text-decoration:none"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M5 21V10l4-3v14"/><path d="M9 21V6l5-3v18"/><path d="M14 21v-9l5 2v7"/></svg><span class="label">Découvrir JexCity</span></a>
-  <button class="btn primary" style="margin-top:16px" id="btn-publish"><span class="pubtxt">Publier</span></button>
+  <button class="btn primary" style="margin-top:16px" id="btn-publish">Publier</button>
   <button class="navbtn off hidden" id="nav-install" type="button"><i data-ic="download"></i><span class="label">Installer l'application</span></button>
 </nav>
 
@@ -258,16 +258,12 @@
 </div>
 
 <aside class="rightpanel" id="rightpanel">
-  <section class="rp-block rp-online">
-    <div class="rp-title" id="rightOnlineTitle">Personnes en ligne</div>
-    <div id="rightSugg"></div>
-  </section>
-  <section class="rp-block rp-sites">
-    <div class="rp-title">Sites externes</div>
-    <div class="rp-sub">Des sites gratuits et utiles</div>
-    <div class="sitecards" id="rightSites"></div>
-    <p class="rp-note">Indépendants de Jexchat.</p>
-  </section>
+  <div class="rp-title">Suggestions pour vous</div>
+  <div class="rp-sub">Des sites gratuits et utiles, triés pour vous</div>
+  <div class="sitecards" id="rightSites"></div>
+  <p class="rp-note">Sites externes, indépendants de Jexchat.</p>
+  <div class="rp-title rp-title2" id="rightOnlineTitle">Personnes en ligne</div>
+  <div id="rightSugg"></div>
 </aside>
 </div>
 

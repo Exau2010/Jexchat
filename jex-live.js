@@ -7,7 +7,7 @@ let MEID = null, SOCK = null, STG = [], LIKES = [], SAVED = [], booted = false, 
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const col = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 6; };
 const ago = (t) => { const s = (Date.now() - +new Date(t)) / 1000; if (s < 60) return 'à l’instant'; if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h'; if (s < 172800) return 'hier'; return new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
-const seenTxt = (t) => { if (!t) return ''; const s = (Date.now() - t) / 1000; if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date().toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(Date.now() - 864e5).toDateString()) return 'vu hier'; return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
+const seenTxt = (t) => { if (!t) return ''; const s = (Date.now() - t) / 1000; if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date().toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(Date.now() - 864e5).toDateString()) return 'vu hier à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
 const copy = (t, m) => { try { navigator.clipboard.writeText(t).then(() => T(m)); } catch { T(t); } };
 
 async function api(m, u, b) {
@@ -135,7 +135,7 @@ const host = (u) => { try { return new URL(u).hostname; } catch { return ''; } }
 const YT = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/|v\/))([\w-]{11})/;
 function embed(u) {
   let m;
-  if ((m = u.match(YT))) return `<iframe referrerpolicy="strict-origin-when-cross-origin" src="https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
+  if ((m = u.match(YT))) return `<iframe referrerpolicy="strict-origin-when-cross-origin" src="https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&enablejsapi=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
   if ((m = u.match(/vimeo\.com\/(\d+)/))) return `<iframe src="https://player.vimeo.com/video/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
   return `<video src="${esc(u)}" controls autoplay playsinline style="width:100%;max-height:420px;border-radius:12px"></video>`;
 }
@@ -172,6 +172,8 @@ async function loadFeed(reset) {
   const f = $('#feed');
   if (reset) { feedSkip = 0; f.innerHTML = '<div class="card sk"></div><div class="card sk"></div>'; }
   const l = await api('GET', '/api/posts?limit=20&skip=' + feedSkip); feedSkip += l.length;
+  const vi = []; l.forEach((r, i) => { if (r.mediaType === 'video') vi.push(i); });
+  for (let i = vi.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [l[vi[i]], l[vi[j]]] = [l[vi[j]], l[vi[i]]]; }
   f.querySelectorAll('.sk,.more2,.empty').forEach((e) => e.remove());
   f.insertAdjacentHTML('beforeend', l.map((r, i) => post(mapPost(r), i)).join(''));
   if (!f.querySelector('.post')) f.innerHTML = '<div class="card empty"><b>Aucune publication</b>Soyez le premier à publier quelque chose !</div>';
@@ -235,7 +237,7 @@ document.addEventListener('click', async (e) => {
     } catch (er) { T(er.message); }
     return;
   }
-  if ((x = t.closest('.play')) && x.parentNode.dataset.vu) { e.stopImmediatePropagation(); e.preventDefault(); x.parentNode.innerHTML = embed(x.parentNode.dataset.vu); return; }
+  if ((x = t.closest('.play')) && x.parentNode.dataset.vu) { e.stopImmediatePropagation(); e.preventDefault(); playIn(x.parentNode); return; }
   if ((x = t.closest('.htag'))) { e.stopImmediatePropagation(); e.preventDefault(); xQ = x.dataset.q; go('exp'); renderExp(); return; }
 }, true);
 
@@ -627,8 +629,47 @@ document.addEventListener('input', (e) => {
   xs = setTimeout(async () => { try { const [u, p] = await Promise.all([api('GET', '/api/users/search?q=' + encodeURIComponent(v)), api('GET', '/api/posts/search?q=' + encodeURIComponent(v))]); u.forEach((z) => { reg(z); if (!(z.username in XB)) XB[z.username] = ''; }); p.forEach((r) => { if (!XP.some((z) => z.id === r.id)) XP.push(xOf(r)); }); if (!$('#vx').hidden && xQ.replace(/^[#@]/, '').trim() === v) { const had = document.activeElement && document.activeElement.id === 'xq'; renderExp(); if (had) { const i = $('#xq'); i.focus(); i.setSelectionRange(xQ.length, xQ.length); } } } catch {} }, 350);
 });
 let lastV = 'home';
+let HSC = 0;
 const _go = go;
-go = function (v, id) { if (lastV === 'notif' && v !== 'notif' && booted) { api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {}); NT.length = 0; nBadge(); } lastV = v; _go(v, id); document.querySelectorAll('.shell>main').forEach((m) => { m.scrollTop = 0; }); if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
+go = function (v, id) { if (lastV === 'notif' && v !== 'notif' && booted) { api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {}); NT.length = 0; nBadge(); } if (lastV === 'home' && v !== 'home') { HSC = $('#vh').scrollTop; if (PLAY) toMini(); } const back = v === 'home' && lastV !== 'home' && HSC > 0;
+  lastV = v; _go(v, id); document.querySelectorAll('.shell>main').forEach((m) => { if (!(back && m.id === 'vh')) m.scrollTop = 0; });
+  if (back) { const h = $('#vh'); h.scrollTop = HSC; requestAnimationFrame(() => { h.scrollTop = HSC; }); } if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
+
+/* ---------- Mini-lecteur flottant (la vidéo continue quand on quitte l'accueil ou qu'on fait défiler) ---------- */
+let PLAY = null, MINI = null, PIO = null;
+{ const st = document.createElement('style'); st.textContent = `.mini{position:fixed;right:14px;bottom:calc(140px + env(safe-area-inset-bottom,0px));width:min(240px,62vw);aspect-ratio:16/9;z-index:19;border-radius:14px;overflow:hidden;background:#000;box-shadow:0 12px 34px rgba(0,0,0,.4);animation:fi .25s}.mini iframe,.mini video{width:100%;height:100%;border:0;display:block}.mini button{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:1;z-index:2}@media(min-width:1025px){.mini{bottom:96px;right:24px}}.post{content-visibility:auto;contain-intrinsic-size:auto 420px}`; document.head.appendChild(st); }
+const YTO = 'https://www.youtube-nocookie.com', VMO = 'https://player.vimeo.com';
+function closeMini() { if (MINI) { MINI.remove(); MINI = null; } }
+function stopPlay() { if (PIO) { PIO.disconnect(); PIO = null; } if (PLAY) { PLAY.box.innerHTML = PLAY.orig; PLAY = null; } }
+function playIn(box) {
+  closeMini(); stopPlay();
+  const u = box.dataset.vu, orig = box.innerHTML; box.innerHTML = embed(u);
+  const f = box.querySelector('iframe,video'); PLAY = { box, url: u, orig, frame: f, t: 0, s: -1 };
+  if (f && f.tagName === 'IFRAME') f.addEventListener('load', () => { try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), YTO); f.contentWindow.postMessage(JSON.stringify({ method: 'addEventListener', value: 'timeupdate' }), VMO); } catch {} });
+  PIO = new IntersectionObserver(([en]) => { if (PLAY && PLAY.box === box && !en.isIntersecting) toMini(); }, { root: box.closest('.shell>main'), threshold: 0.15 }); PIO.observe(box);
+}
+addEventListener('message', (e) => {
+  if (!PLAY || !PLAY.frame || e.source !== PLAY.frame.contentWindow) return;
+  let d = e.data; try { if (typeof d === 'string') d = JSON.parse(d); } catch { return; } if (!d) return;
+  if (e.origin === YTO && d.event === 'infoDelivery' && d.info) { if (typeof d.info.currentTime === 'number') PLAY.t = d.info.currentTime; if (typeof d.info.playerState === 'number') PLAY.s = d.info.playerState; }
+  if (e.origin === VMO && d.event === 'timeupdate' && d.data) PLAY.t = d.data.seconds;
+});
+function toMini() {
+  if (!PLAY) return; const p = PLAY, isV = p.frame && p.frame.tagName === 'VIDEO', t = Math.floor(isV ? p.frame.currentTime : p.t || 0), on = isV ? !p.frame.paused : p.s !== 2 && p.s !== 0;
+  stopPlay(); if (!on) return; closeMini(); let m, h;
+  if ((m = p.url.match(YT))) h = `<iframe src="${YTO}/embed/${m[1]}?autoplay=1&playsinline=1&start=${t}" allow="autoplay; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+  else if ((m = p.url.match(/vimeo\.com\/(\d+)/))) h = `<iframe src="${VMO}/video/${m[1]}?autoplay=1#t=${t}s" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+  else h = `<video src="${esc(p.url)}#t=${t}" controls autoplay playsinline></video>`;
+  MINI = document.createElement('div'); MINI.className = 'mini'; MINI.innerHTML = '<button aria-label="Fermer le lecteur">×</button>' + h; document.body.appendChild(MINI);
+}
+document.addEventListener('click', (e) => { if (MINI && e.target.closest('.mini>button')) closeMini(); });
+
+/* ---------- Bannière de notification : ne revient plus après réponse ---------- */
+{ const b = $('#pushb'); if (b) {
+  let t = 0; try { t = +localStorage.getItem('jx-pushb') || 0; } catch {}
+  if (!('Notification' in window) || Notification.permission !== 'default' || Date.now() - t < 7 * 864e5) b.remove();
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-pa]')) { try { localStorage.setItem('jx-pushb', String(Date.now())); } catch {} } }, true);
+} }
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];

@@ -26,6 +26,7 @@ const io = new Server(server, {
   cors: { origin: false },
   pingTimeout: 10000,
   pingInterval: 8000,
+  perMessageDeflate: false,
 });
 
 const PORT = process.env.PORT || 3000;

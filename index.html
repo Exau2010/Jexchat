@@ -297,6 +297,7 @@ body{overflow-x:clip;max-width:100%;min-height:100dvh}
 .ai{right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:11}
 .aip{left:6px;right:6px;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:auto}
 .pg{margin:0 -6px}.pgw{border:0}
+.main.pg{width:calc(100% + 12px);max-width:none}
 .toast{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 }
 @media(max-width:380px){.top .ib{width:40px;height:40px}.pt{font-size:15px}}
@@ -862,4 +863,4 @@ function renderCity(){const c=document.querySelector('.right .city svg');$('#vj'
 document.addEventListener('click',e=>{const x=e.target.closest('[data-jc]');if(!x)return;if(x.dataset.jc==='enter')return T('Zone de démonstration — disponible dans l’application JexCity');const z=ZN[+x.dataset.i];T(z[2]?z[0]+' — ouverture dans l’application JexCity':z[0]+' — bientôt disponible')});
 $('#vc').insertAdjacentHTML('afterend','<main class="main pg" id="vj" hidden aria-label="JexCity"></main>');renderCity();
 document.addEventListener('visibilitychange',()=>document.body.classList.toggle('paused',document.hidden));
-</script><script src="/jex-live.js"></script></body></html>
+</script><script src="/jex-live.js"></script><script src="/story-editor.js"></script></body></html>

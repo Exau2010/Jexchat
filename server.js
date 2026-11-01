@@ -23,8 +23,8 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: false },
-  pingTimeout: 30000,
-  pingInterval: 25000,
+  pingTimeout: 10000,
+  pingInterval: 8000,
 });
 
 const PORT = process.env.PORT || 3000;
@@ -105,7 +105,7 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,
@@ -960,19 +960,6 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       throw e;
     }
     if (imageClaim) await chatMedia.attach(imageClaim._id, message._id);
-    // Temps réel : le message est diffusé aux membres dès qu'il est enregistré. Les mises à jour
-    // annexes (dernier message, compteurs, notifications, push) passent APRÈS la diffusion.
-    const [[msgOutBase]] = await Promise.all([
-      (safeSharedPostId || replyToId) ? enrichMessages([message]) : [safeMessage(message)],
-      // Un nouveau message fait réapparaître la conversation chez tout participant qui l'avait supprimée.
-      db.unhideConversationForAll(req.params.id),
-    ]);
-    const msgOut = {
-      ...msgOutBase,
-      sender: safeUser(req.user),
-    };
-    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
-
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
     await db.updateConversationLastMessage(req.params.id, {
       content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
@@ -980,8 +967,19 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       type: msgType,
       createdAt: message.createdAt,
     });
+    // Un nouveau message fait réapparaître la conversation chez tout
+    // participant qui l'avait supprimée de sa propre liste.
+    await db.unhideConversationForAll(req.params.id);
 
-    // Compteurs non lus + notifications
+    const sender = await db.findUserById(req.user._id);
+    const [msgOutBase] = (safeSharedPostId || replyToId) ? await enrichMessages([message]) : [safeMessage(message)];
+    const msgOut = {
+      ...msgOutBase,
+      sender: safeUser(sender),
+    };
+
+    // Émission immédiate à tous les membres, avant les écritures/notifications (plus de retard en cascade)
+    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
     for (const memberId of conv.members) {
       const mid = memberId.toString();
       if (mid !== req.user._id.toString()) {
@@ -1301,9 +1299,7 @@ app.get('/api/posts', sec.requireAuth, async (req, res) => {
   try {
     const skip = parseInt(req.query.skip) || 0;
     const limit = Math.min(parseInt(req.query.limit) || 20, 30);
-    // Fil mélangé à chaque actualisation (graine envoyée par le client) ; sans graine : ordre chronologique inchangé.
-    const seed = typeof req.query.seed === 'string' ? req.query.seed.replace(/[^\w-]/g, '').slice(0, 64) : '';
-    const posts = seed ? await db.getPostsShuffled(seed, skip, limit) : await db.getPosts(skip, limit);
+    const posts = await db.getPosts(skip, limit);
     return res.json(await enrichPosts(posts, req.user._id.toString()));
   } catch (err) {
     console.error('[Posts]', err.message);
@@ -1643,9 +1639,9 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
     const [msgOutBase] = await enrichMessages([message]);
     const msgOut = { ...msgOutBase, sender: safeUser(sender) };
 
+    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
     for (const memberId of conv.members) {
       const mid = memberId.toString();
-      io.to(`user:${mid}`).emit('new_message', msgOut);
       if (mid !== req.user._id.toString()) {
         await db.incrementUnread(req.body.conversationId, mid);
         const member = await db.findUserById(mid);

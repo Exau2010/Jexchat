@@ -106,12 +106,15 @@ function embed(u) {
   if ((m = u.match(/vimeo\.com\/(\d+)/))) return `<iframe src="https://player.vimeo.com/video/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
   return `<video src="${esc(u)}" controls autoplay playsinline style="width:100%;max-height:420px;border-radius:12px"></video>`;
 }
+const ytid = (u) => { const m = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/); return m && m[1]; };
+const thumb = (u) => { const y = ytid(u); return y ? `<img src="https://img.youtube.com/vi/${y}/hqdefault.jpg" alt="" referrerpolicy="no-referrer">` : `<div style="background:linear-gradient(135deg,#0b1030,#2b2f8f 60%,#8b3ef0);display:grid;place-items:center;color:#9fb4ff;font:600 16px monospace;padding:16px;text-align:center">${esc(host(u))}</div>`; };
 const isEmb = (u) => /youtu\.?be|vimeo\.com|\.(mp4|webm|ogg)(\?|$)/i.test(u);
 media = function (p) {
   const r = p.raw; if (!r) return '';
   const one = (o) => {
-    if (o.mediaType === 'image') return `<div class="media"><img data-u="${esc(o.mediaUrl)}" src="${esc(o.mediaUrl)}" alt="" loading="lazy"></div>`;
-    if (o.mediaType === 'video' && isEmb(o.mediaUrl)) return `<div class="media" data-vu="${esc(o.mediaUrl)}"><div style="background:linear-gradient(135deg,#0b1030,#2b2f8f 60%,#8b3ef0);display:grid;place-items:center;color:#9fb4ff;font:600 16px monospace;padding:16px;text-align:center">${esc(host(o.mediaUrl))}</div><button class="play" aria-label="Lire la vidéo"><span>${ic('play', 'style="fill:#fff;margin-left:3px"')}</span></button><span class="tag">Vidéo</span></div>`;
+    if (o.mediaType === 'image') return `<div class="media"><img data-u="${esc(o.mediaUrl)}" src="${esc(o.mediaUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>`;
+    if (o.mediaType === 'video' && /\.(mp4|webm|ogg)(\?|$)/i.test(o.mediaUrl)) return `<div class="media"><video src="${esc(o.mediaUrl)}#t=0.1" controls playsinline preload="metadata" style="background:#000"></video></div>`;
+    if (o.mediaType === 'video' && isEmb(o.mediaUrl)) return `<div class="media" data-vu="${esc(o.mediaUrl)}">${thumb(o.mediaUrl)}<button class="play" aria-label="Lire la vidéo"><span>${ic('play', 'style="fill:#fff;margin-left:3px"')}</span></button><span class="tag">Vidéo</span></div>`;
     if (o.mediaType === 'video' || o.mediaType === 'link') return `<a class="lk" href="${esc(o.mediaUrl)}" target="_blank" rel="noopener noreferrer" style="--c:linear-gradient(135deg,${o.mediaType === 'video' ? '#8B3EF0,#0057FF' : '#12b886,#0b7285'})"><div class="th">${ic(o.mediaType === 'video' ? 'play' : 'ext')}</div><div><small>${esc(host(o.mediaUrl))}</small><b>${o.mediaType === 'video' ? 'Vidéo' : 'Lien'}</b><small>${esc(o.mediaUrl)}</small></div></a>`;
     return '';
   };
@@ -262,7 +265,7 @@ function mapConv(x) {
   Object.assign(c, { type: x.type, name: x.name, unread: x.unreadCount || 0, ids: x.members.map((m) => m.id), mem: x.members.map((m) => m.username), owner: String(x.owner) === String(MEID) ? 1 : 0, other: o ? o.id : null, k: col(x.name), bgSrv: x.background });
   if (o) { o.isOnline ? ONL.add(o.username) : ONL.delete(o.username); c.seen = o.lastSeen ? 'vu ' + ago(o.lastSeen) : ''; }
   applyBg(c, x.background);
-  if (!c.loaded && x.lastMessage && x.lastMessage.createdAt) { const l = x.lastMessage; c.ms = [{ id: 'lm' + x.id, f: String(l.senderId) === String(MEID) ? 'me' : (c.name), x: l.content || '', type: ptype(l.type), t: +new Date(l.createdAt), a: 0, stub: 1, r: {} }]; }
+  if (!c.loaded && x.lastMessage && x.lastMessage.createdAt && Date.now() - +new Date(x.lastMessage.createdAt) < 5 * 864e5) { const l = x.lastMessage; c.ms = [{ id: 'lm' + x.id, f: String(l.senderId) === String(MEID) ? 'me' : (c.name), x: l.content || '', type: ptype(l.type), t: +new Date(l.createdAt), a: 0, stub: 1, r: {} }]; }
   return c;
 }
 function applyBg(c, b) {
@@ -270,7 +273,7 @@ function applyBg(c, b) {
   const m = /^bg(\d+)$/.exec(b.value || ''); if (b.type === 'gradient' && m && BG[+m[1]]) c.bg = +m[1];
 }
 async function loadConvs() { const l = await api('GET', '/api/conversations?limit=50'); const keep = new Set(l.map((x) => x.id)); l.forEach(mapConv); for (let i = D.length - 1; i >= 0; i--) if (!keep.has(D[i].id)) D.splice(i, 1); const S = sget('jx-bgs', {}); D.forEach((c) => { const s = S[c.id]; if (s && s.bgu) { c.bg = s.bg; c.bgu = s.bgu; } }); }
-async function loadMsgs(c) { const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); c.ms = l.map(mapMsg).sort((a, b) => a.t - b.t); c.loaded = 1; }
+async function loadMsgs(c) { const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); c.ms = l.filter((m) => !m.expired && m.type !== 'expired').map(mapMsg).sort((a, b) => a.t - b.t); c.loaded = 1; }
 const _open = openConv;
 openConv = function (id) {
   const c = D.find((z) => z.id === id); if (!c) return; const un = c.unread;
@@ -311,7 +314,7 @@ send = function () {
   push(c, m); i.value = ''; $('#sd').disabled = true; if (SOCK) SOCK.emit('typing_stop', { conversationId: c.id });
 };
 sendImg = async function () {
-  const c = cv(), cap = $('#cap').value.trim(), w = $('#pgw'), p = $('#pgi'), file = pend && pend.file; if (!file) return T('Image introuvable.');
+  const c = cv(), cap = $('#cap').value.trim(), w = $('#pgw'), p = $('#pgi'), file = window.__jxFile; if (!file) return T('Image introuvable.');
   w.hidden = false; p.style.width = '40%';
   try {
     const bl = await shrink(file, 1600, .85);
@@ -325,7 +328,7 @@ function shrink(file, max, qual) {
   return new Promise((ok, ko) => { const im = new Image(), u = URL.createObjectURL(file); im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), cn = document.createElement('canvas'); cn.width = Math.round(im.width * k); cn.height = Math.round(im.height * k); cn.getContext('2d').drawImage(im, 0, 0, cn.width, cn.height); URL.revokeObjectURL(u); cn.toBlob((b) => (b ? ok(b) : ko(new Error('Image illisible.'))), 'image/jpeg', qual); }; im.onerror = () => ko(new Error('Image illisible.')); im.src = u; });
 }
 document.addEventListener('change', (e) => { // conserve le fichier pour l'envoi réel (le gestionnaire d'origine garde l'aperçu)
-  if (e.target.id !== 'fi') return; const f = e.target.files[0]; if (f) setTimeout(() => { if (pend) pend.file = f; }, 0);
+  if (e.target.id !== 'fi') return; const f = e.target.files[0]; if (f) window.__jxFile = f;
 }, true);
 react = async function (id, t) {
   const m = gm(id); if (!m) return; CL();
@@ -396,7 +399,7 @@ function connectSocket() {
   SOCK.on('new_message', async (msg) => {
     let c = cOf(msg.conversationId);
     if (!c) { try { c = mapConv(await api('GET', '/api/conversations/' + msg.conversationId)); } catch { return; } }
-    const m = mapMsg(msg), mine = m.f === 'me';
+    if (msg.expired || msg.type === 'expired') return; const m = mapMsg(msg), mine = m.f === 'me';
     if (c.ms.some((z) => String(z.id) === String(m.id))) return;
     if (mine) { const p = c.ms.find((z) => z.pending && z.f === 'me' && z.type === m.type && (z.x === m.x || m.type !== 'text')); if (p) { adopt(c, p, m.id); return; } }
     c.ms = c.ms.filter((z) => !z.stub); c.ms.push(m); c.ud = null;
@@ -436,7 +439,7 @@ async function loadNotifs() {
 }
 document.addEventListener('click', (e) => {
   const x = e.target.closest('[data-pg]'); if (!x) return; const a = x.dataset.pg, id = x.dataset.id || (x.closest('.ni') || { dataset: {} }).dataset.id;
-  if (a === 'nall') api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {});
+  if (a === 'nall') { api('POST', '/api/notifs/state', { all: true, del: true }).catch(() => {}); setTimeout(() => { NT.length = 0; renderNotif(true); nBadge(); }, 0); }
   else if (a === 'nopen' && !e.target.closest('.nm,.go')) { const n = NT.find((z) => z.id === id); if (n && n.u) api('POST', '/api/notifs/state', { ids: [id], read: true }).catch(() => {}); }
   else if (a === 'ntog') { const n = NT.find((z) => z.id === id); if (n) api('POST', '/api/notifs/state', { ids: [id], read: !!n.u }).catch(() => {}); }
   else if (a === 'ndel') api('POST', '/api/notifs/state', { ids: [id], del: true }).catch(() => {});
@@ -531,8 +534,9 @@ document.addEventListener('input', (e) => {
   if (e.target.id !== 'xq') return; clearTimeout(xs); const v = e.target.value.replace(/^[#@]/, '').trim(); if (v.length < 2) return;
   xs = setTimeout(async () => { try { const [u, p] = await Promise.all([api('GET', '/api/users/search?q=' + encodeURIComponent(v)), api('GET', '/api/posts/search?q=' + encodeURIComponent(v))]); u.forEach((z) => { reg(z); if (!(z.username in XB)) XB[z.username] = ''; }); p.forEach((r) => { if (!XP.some((z) => z.id === r.id)) XP.push(xOf(r)); }); if (!$('#vx').hidden && xQ.replace(/^[#@]/, '').trim() === v) { const had = document.activeElement && document.activeElement.id === 'xq'; renderExp(); if (had) { const i = $('#xq'); i.focus(); i.setSelectionRange(xQ.length, xQ.length); } } } catch {} }, 350);
 });
+let lastV = 'home';
 const _go = go;
-go = function (v, id) { _go(v, id); if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
+go = function (v, id) { if (lastV === 'notif' && v !== 'notif' && booted) { api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {}); NT.length = 0; nBadge(); } lastV = v; _go(v, id); if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];
@@ -566,7 +570,12 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
 
 /* ---------- Démarrage ---------- */
 (async () => {
-  try { await api('GET', '/api/auth/me'); await loadProfile(); setSess({ u: ME }, true); booted = true; await bootData(); connectSocket(); renderAcct(); pushSetup(false); if (/^\/messages/.test(location.pathname)) go('msg'); else if (/^\/settings/.test(location.pathname)) go('acct'); else if (/^\/lapage\//.test(location.pathname)) go('prof'); }
-  catch { showAuth(); }
+  let me; try { me = await api('GET', '/api/auth/me'); } catch { return showAuth(); }
+  ME = me.username; MEID = me.id; ACCS[ME] = ACCS[ME] || { name: ME, handle: ME, email: '', created: (me.createdAt || '').slice(0, 10) }; setSess({ u: ME }, true);
+  try { await loadProfile(); } catch (e) { PD.name = PD.name || ME; PD.handle = ME; AVM[ME] = me.avatarUrl || ''; PD.av = me.avatarUrl || null; }
+  $('#auth').hidden = true; booted = true;
+  try { await bootData(); } catch {}
+  try { connectSocket(); renderAcct(); pushSetup(false); } catch {}
+  if (/^\/messages/.test(location.pathname)) go('msg'); else if (/^\/settings/.test(location.pathname)) go('acct'); else if (/^\/lapage\//.test(location.pathname)) go('prof');
 })();
 })();

@@ -10,6 +10,15 @@ const { _sniff: sniff } = require('./chat-media.js');
 
 const OID = mongoose.Types.ObjectId;
 const isOid = (v) => /^[a-f\d]{24}$/i.test(String(v));
+const BUCKET = 'jexchatmedia';
+let sb = null;
+function supa() {
+  if (sb) return sb;
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) return null;
+  sb = require('@supabase/supabase-js').createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return sb;
+}
 const MAX_AVATAR = 1.5 * 1024 * 1024;
 
 const Profile = mongoose.models.Profile || mongoose.model('Profile', new mongoose.Schema({
@@ -29,7 +38,7 @@ const Profile = mongoose.models.Profile || mongoose.model('Profile', new mongoos
   push: { type: Boolean, default: true },
   snd: { type: Boolean, default: true },
   notifPrefs: { type: mongoose.Schema.Types.Mixed, default: {} },
-  avatar: { data: Buffer, mime: String },
+  avatar: { data: Buffer, mime: String, path: String },
   saved: [{ type: OID }],
 }));
 
@@ -127,7 +136,13 @@ function mount(app, sec, io, db) {
       if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'Image manquante.' });
       const kind = sniff(buf);
       if (!kind) return res.status(415).json({ error: 'Format non autorisé (JPEG, PNG ou WebP).' });
-      await Profile.updateOne({ userId: req.user._id }, { $set: { avatar: { data: buf, mime: kind.mime } } }, { upsert: true });
+      const path = `avatars/${req.user._id}.${kind.ext}`;
+      let inSb = false;
+      if (supa()) {
+        const { error } = await supa().storage.from(BUCKET).upload(path, buf, { contentType: kind.mime, upsert: true, cacheControl: '60' });
+        if (error) console.warn('[Avatar] Supabase:', error.message); else inSb = true;
+      }
+      await Profile.updateOne({ userId: req.user._id }, inSb ? { $set: { avatar: { mime: kind.mime, path } } } : { $set: { avatar: { data: buf, mime: kind.mime } } }, { upsert: true });
       const url = `/api/avatar/${req.user._id}?v=${Date.now()}`;
       await db.User.updateOne({ _id: req.user._id }, { $set: { avatarUrl: url } });
       return res.json({ avatarUrl: url });
@@ -135,6 +150,8 @@ function mount(app, sec, io, db) {
   });
   app.delete('/api/me/avatar', sec.requireAuth, async (req, res) => {
     try {
+      const p0 = await Profile.findOne({ userId: req.user._id }).select('avatar.path').lean();
+      if (p0?.avatar?.path && supa()) await supa().storage.from(BUCKET).remove([p0.avatar.path]).catch(() => {});
       await Profile.updateOne({ userId: req.user._id }, { $unset: { avatar: 1 } });
       await db.User.updateOne({ _id: req.user._id }, { $set: { avatarUrl: '' } });
       return res.json({ avatarUrl: '' });
@@ -144,9 +161,16 @@ function mount(app, sec, io, db) {
     try {
       if (!isOid(req.params.id)) return res.status(404).end();
       const p = await Profile.findOne({ userId: req.params.id }).select('avatar').lean();
-      if (!p || !p.avatar || !p.avatar.data) return res.status(404).end();
+      if (!p || !p.avatar) return res.status(404).end();
+      let data = null;
+      if (p.avatar.path && supa()) {
+        const { data: blob, error } = await supa().storage.from(BUCKET).download(p.avatar.path);
+        if (error || !blob) return res.status(404).end();
+        data = Buffer.from(await blob.arrayBuffer());
+      } else if (p.avatar.data) data = p.avatar.data.buffer ? Buffer.from(p.avatar.data.buffer) : p.avatar.data;
+      if (!data) return res.status(404).end();
       res.set({ 'Content-Type': p.avatar.mime || 'image/jpeg', 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" });
-      return res.end(p.avatar.data.buffer ? Buffer.from(p.avatar.data.buffer) : p.avatar.data);
+      return res.end(data);
     } catch (e) { return res.status(500).end(); }
   });
 
@@ -243,7 +267,7 @@ function mount(app, sec, io, db) {
   // ── Notifications : liste complète (lues + non lues), non lue/lue, suppression ──
   app.get('/api/notifs', sec.requireAuth, async (req, res) => {
     try {
-      const list = await db.Notification.find({ userId: req.user._id }).sort({ createdAt: -1 }).limit(100).lean();
+      const list = await db.Notification.find({ userId: req.user._id, read: false }).sort({ createdAt: -1 }).limit(100).lean();
       const us = await db.findUsersByIds([...new Set(list.map((n) => n.fromUserId).filter(Boolean).map(String))]);
       const um = new Map(us.map((u) => [String(u._id), card(u)]));
       const posts = await db.getPostsByIds([...new Set(list.map((n) => n.postId).filter(Boolean).map(String))]);

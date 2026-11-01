@@ -960,6 +960,19 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       throw e;
     }
     if (imageClaim) await chatMedia.attach(imageClaim._id, message._id);
+    // Temps réel : le message est diffusé aux membres dès qu'il est enregistré. Les mises à jour
+    // annexes (dernier message, compteurs, notifications, push) passent APRÈS la diffusion.
+    const [[msgOutBase]] = await Promise.all([
+      (safeSharedPostId || replyToId) ? enrichMessages([message]) : [safeMessage(message)],
+      // Un nouveau message fait réapparaître la conversation chez tout participant qui l'avait supprimée.
+      db.unhideConversationForAll(req.params.id),
+    ]);
+    const msgOut = {
+      ...msgOutBase,
+      sender: safeUser(req.user),
+    };
+    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
+
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
     await db.updateConversationLastMessage(req.params.id, {
       content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
@@ -967,21 +980,10 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       type: msgType,
       createdAt: message.createdAt,
     });
-    // Un nouveau message fait réapparaître la conversation chez tout
-    // participant qui l'avait supprimée de sa propre liste.
-    await db.unhideConversationForAll(req.params.id);
 
-    const sender = await db.findUserById(req.user._id);
-    const [msgOutBase] = (safeSharedPostId || replyToId) ? await enrichMessages([message]) : [safeMessage(message)];
-    const msgOut = {
-      ...msgOutBase,
-      sender: safeUser(sender),
-    };
-
-    // Emit to all members
+    // Compteurs non lus + notifications
     for (const memberId of conv.members) {
       const mid = memberId.toString();
-      io.to(`user:${mid}`).emit('new_message', msgOut);
       if (mid !== req.user._id.toString()) {
         await db.incrementUnread(req.params.id, mid);
         // Notification (sauf si le destinataire a déjà cette conversation
@@ -1299,7 +1301,9 @@ app.get('/api/posts', sec.requireAuth, async (req, res) => {
   try {
     const skip = parseInt(req.query.skip) || 0;
     const limit = Math.min(parseInt(req.query.limit) || 20, 30);
-    const posts = await db.getPosts(skip, limit);
+    // Fil mélangé à chaque actualisation (graine envoyée par le client) ; sans graine : ordre chronologique inchangé.
+    const seed = typeof req.query.seed === 'string' ? req.query.seed.replace(/[^\w-]/g, '').slice(0, 64) : '';
+    const posts = seed ? await db.getPostsShuffled(seed, skip, limit) : await db.getPosts(skip, limit);
     return res.json(await enrichPosts(posts, req.user._id.toString()));
   } catch (err) {
     console.error('[Posts]', err.message);

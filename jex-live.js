@@ -136,13 +136,15 @@ post = function (p, i) {
   const r = p.raw || {}, mine = String(p.aid) === String(MEID);
   return `<article class="card post" data-id="${p.id}" data-aid="${p.aid}" data-mine="${mine ? 1 : 0}" style="animation:sh0 .5s ${i * .06}s both"><div class="ph"><div class="sm">${av(p.a, p.k)}</div><div><b>${esc(p.a)}${p.v ? VER : ''}</b><small>${p.t}</small></div><button class="more" aria-label="Options">${ic('more')}</button></div>${p.x ? `<div class="pt">${ptxt(p.x)}</div>` : ''}${media(p)}${r.description ? `<div class="pt" style="color:var(--sub);font-size:13.5px;margin-top:10px">${ptxt(r.description)}</div>` : ''}<div class="pa"><button class="act ${p.liked ? 'on' : ''}" aria-pressed="${!!p.liked}" onclick="lk(this,${p.n})">${ic('heart')}<span>${fm(p.n + (p.liked ? 1 : 0))}</span></button><button class="act">${ic('share')}<span>Partager</span></button></div></article>`;
 };
-let feedSkip = 0;
+let feedSkip = 0, feedSeed = '';
 async function loadFeed(reset) {
   const f = $('#feed');
+  // Nouvelle graine à chaque actualisation => ordre différent ; même graine pour « Voir plus » => pages cohérentes.
+  if (reset || !feedSeed) feedSeed = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   if (reset) { feedSkip = 0; f.innerHTML = '<div class="card sk"></div><div class="card sk"></div>'; }
-  const l = await api('GET', '/api/posts?limit=20&skip=' + feedSkip); feedSkip += l.length;
+  const l = await api('GET', '/api/posts?limit=20&skip=' + feedSkip + '&seed=' + feedSeed); feedSkip += l.length;
   f.querySelectorAll('.sk,.more2,.empty').forEach((e) => e.remove());
-  f.insertAdjacentHTML('beforeend', l.map((r, i) => post(mapPost(r), i)).join(''));
+  f.insertAdjacentHTML('beforeend', l.filter((r) => !f.querySelector(`.post[data-id="${r.id}"]`)).map((r, i) => post(mapPost(r), i)).join(''));
   if (!f.querySelector('.post')) f.innerHTML = '<div class="card empty"><b>Aucune publication</b>Soyez le premier à publier quelque chose !</div>';
   else if (l.length >= 20) f.insertAdjacentHTML('beforeend', '<button class="more2">Voir plus</button>');
 }
@@ -171,12 +173,29 @@ function addPost(r, mine) {
 }
 
 /* clics sur le fil : like, menu, partage, vidéos, hashtags */
+const likeBusy = {};
+function setLikeUI(id, liked, count) { // met à jour toutes les copies de la publication (fil, fenêtre de détail)
+  document.querySelectorAll(`.post[data-id="${id}"]`).forEach((a) => {
+    const b = a.querySelector('.act[onclick^="lk("]'); if (!b) return;
+    b.classList.toggle('on', !!liked); b.setAttribute('aria-pressed', !!liked);
+    b.setAttribute('onclick', `lk(this,${Math.max(0, count - (liked ? 1 : 0))})`);
+    const sp = b.querySelector('span'); if (sp) sp.textContent = fm(count);
+  });
+}
 document.addEventListener('click', async (e) => {
   const t = e.target, art = t.closest('.post'), id = art && art.dataset.id;
   let x;
-  if ((x = t.closest('.act[onclick^="lk("]')) && id) { // like (l'interface bascule déjà l'état)
-    const n = +x.getAttribute('onclick').match(/lk\(this,(\d+)\)/)[1];
-    api('POST', `/api/posts/${id}/like`).catch((er) => { lk(x, n); T(er.message); });
+  if ((x = t.closest('.act[onclick^="lk("]')) && id) { // like
+    // Avant : le onclick d'origine ET le gestionnaire délégué basculaient chacun l'état (2 bascules = rien).
+    // Ici : on bloque les deux, on bascule UNE fois, tout de suite, puis on s'aligne sur la réponse du serveur.
+    e.stopImmediatePropagation(); e.preventDefault();
+    const n = +x.getAttribute('onclick').match(/lk\(this,(\d+)\)/)[1], on = !x.classList.contains('on');
+    setLikeUI(id, on, n + (on ? 1 : 0));
+    likeBusy[id] = (likeBusy[id] || 0) + 1;
+    api('POST', `/api/posts/${id}/like`)
+      .then((r) => { if (r && likeBusy[id] === 1) setLikeUI(id, !!r.liked, r.likesCount); })
+      .catch((er) => { setLikeUI(id, !on, n + (on ? 0 : 1)); T(er.message); })
+      .finally(() => { likeBusy[id]--; });
     return;
   }
   if ((x = t.closest('.act')) && /Partager/.test(x.textContent) && id) {
@@ -204,9 +223,43 @@ document.addEventListener('click', async (e) => {
     } catch (er) { T(er.message); }
     return;
   }
-  if ((x = t.closest('.play')) && x.parentNode.dataset.vu) { e.stopImmediatePropagation(); e.preventDefault(); x.parentNode.innerHTML = embed(x.parentNode.dataset.vu); return; }
+  if ((x = t.closest('.play')) && x.parentNode.dataset.vu) { e.stopImmediatePropagation(); e.preventDefault(); playEmbed(x.parentNode); return; }
   if ((x = t.closest('.htag'))) { e.stopImmediatePropagation(); e.preventDefault(); xQ = x.dataset.q; go('exp'); renderExp(); return; }
 }, true);
+
+
+/* ---------- Lecture vidéo : une seule à la fois, arrêt dès qu'on s'éloigne ---------- */
+const MIO = 'IntersectionObserver' in window ? new IntersectionObserver((es) => es.forEach((en) => { if (en.intersectionRatio < 0.25) stopEl(en.target); }), { threshold: [0, 0.25, 0.5] }) : null;
+function noPip(root) { // pas de mini-lecteur flottant du navigateur
+  (root.tagName === 'VIDEO' ? [root] : [...root.querySelectorAll('video')]).forEach((v) => { v.disablePictureInPicture = true; v.setAttribute('controlslist', 'nopictureinpicture'); });
+}
+function stopEl(el) {
+  if (MIO) MIO.unobserve(el);
+  if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') { if (!el.paused) el.pause(); return; }
+  if (el.dataset.vplay) { el.innerHTML = el.dataset.vorig || ''; delete el.dataset.vplay; delete el.dataset.vorig; return; }
+  if (el.dataset.mrestore) { el.outerHTML = el.dataset.mrestore; }
+}
+function stopAll(except) { // arrête toute lecture en cours (sauf `except`)
+  const keep = (el) => except && (el === except || el.contains(except));
+  document.querySelectorAll('[data-vplay],[data-mrestore]').forEach((b) => { if (!keep(b)) stopEl(b); });
+  document.querySelectorAll('video,audio').forEach((v) => { if (v !== except && !keep(v) && !v.paused) v.pause(); });
+  try { if (document.pictureInPictureElement && document.pictureInPictureElement !== except) document.exitPictureInPicture().catch(() => {}); } catch {}
+}
+function playEmbed(box) {
+  stopAll(box);
+  box.dataset.vorig = box.innerHTML; box.dataset.vplay = '1';
+  box.innerHTML = embed(box.dataset.vu);
+  noPip(box); if (MIO) MIO.observe(box);
+}
+document.addEventListener('play', (e) => { // lecteur <video>/<audio> lancé : on arrête les autres
+  const v = e.target; if (!v || (v.tagName !== 'VIDEO' && v.tagName !== 'AUDIO')) return;
+  stopAll(v); if (v.tagName === 'VIDEO') { noPip(v); if (MIO) MIO.observe(v); }
+}, true);
+{ // toucher une publication ouvre sa fiche (copie du HTML) : la lecture en cours s'arrête, la copie ne rejoue pas
+  const detb = q$('#detb');
+  if (detb) new MutationObserver(() => stopAll()).observe(detb, { childList: true });
+  if (typeof DET !== 'undefined' && DET) new MutationObserver(() => { if (!DET.classList.contains('on')) stopAll(); }).observe(DET, { attributes: true, attributeFilter: ['class'] });
+}
 
 /* ---------- Stories ---------- */
 async function loadStories() { STG = await api('GET', '/api/stories'); STG.forEach((g) => reg(g.author)); renderStories(); }
@@ -390,7 +443,7 @@ document.addEventListener('click', async (e) => {
 // lecteurs audio / vidéo des messages
 document.addEventListener('click', (e) => {
   let x = e.target.closest('[data-au]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { if (!x.__a) { x.__a = new Audio(m.url); x.__a.onended = () => x.classList.remove('pl'); } x.classList.contains('pl') ? x.__a.pause() : x.__a.play().catch(() => T('Lecture impossible.')); } return; }
-  x = e.target.closest('[data-play]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { e.stopImmediatePropagation(); x.outerHTML = `<div class="vd" style="cursor:default;overflow:hidden;width:min(320px,100%);aspect-ratio:16/9">${embed(m.url)}</div>`; } }
+  x = e.target.closest('[data-play]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { e.stopImmediatePropagation(); stopAll(); const w = document.createElement('div'); w.className = 'vd'; w.setAttribute('style', 'cursor:default;overflow:hidden;width:min(320px,100%);aspect-ratio:16/9'); w.dataset.mrestore = x.outerHTML; w.innerHTML = embed(m.url); x.replaceWith(w); noPip(w); if (MIO) MIO.observe(w); } }
 }, true);
 const _mh = mh;
 mh = function (c, m, p) { // photo du partage de publication + téléchargement
@@ -414,7 +467,9 @@ function connectSocket() {
     if (c.ms.some((z) => String(z.id) === String(m.id))) return;
     if (mine) { const p = c.ms.find((z) => z.pending && z.f === 'me' && z.type === m.type && (z.x === m.x || m.type !== 'text')); if (p) { adopt(c, p, m.id); return; } }
     c.ms = c.ms.filter((z) => !z.stub); c.ms.push(m); c.ud = null;
-    if (cur === c.id && !document.hidden) { appendOne(c, m); if (!mine) api('POST', `/api/conversations/${c.id}/seen`).catch(() => {}); }
+    // Conversation ouverte : le message s'affiche TOUJOURS tout de suite (même onglet en arrière-plan) ;
+    // seul l'accusé de lecture attend que l'onglet soit visible.
+    if (cur === c.id) { appendOne(c, m); if (!mine) { if (!document.hidden) api('POST', `/api/conversations/${c.id}/seen`).catch(() => {}); else c.pendSeen = 1; } }
     else if (!mine) { c.unread++; if (PD.msgToast !== 0) T(c.name + ' : ' + pv(m).slice(0, 40)); }
     if (!mine) { c.ty = null; if (cur === c.id) typ(false); }
     renderList();
@@ -432,13 +487,38 @@ function connectSocket() {
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));
   SOCK.on('background_changed', (r) => { const c = cOf(r.conversationId); if (c) { applyBg(c, r.background); if (cur === c.id) { $('#tr').setAttribute('style', bgc(c)); bgImg(); } } });
   SOCK.on('account_deleted', kick);
-  SOCK.on('notification', () => { clearTimeout(notifT); notifT = setTimeout(() => loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}), 400); });
+  SOCK.on('notification', () => { clearTimeout(notifT); notifT = setTimeout(() => loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}), 60); });
   SOCK.on('post_created', (r) => { if (booted && String(r.author.id) !== String(MEID)) addPost(r); });
   SOCK.on('post_liked', (r) => { document.querySelectorAll(`.post[data-id="${r.postId}"]`).forEach((a) => { const b = a.querySelector('.act[onclick^="lk("]'); if (!b) return; const on = b.classList.contains('on'); b.setAttribute('onclick', `lk(this,${r.likesCount - (on ? 1 : 0)})`); b.querySelector('span').textContent = fm(r.likesCount); }); });
   SOCK.on('post_deleted', (r) => { const a = document.querySelector(`.post[data-id="${r.postId}"]`); if (a) a.remove(); });
   SOCK.on('story_created', () => loadStories().catch(() => {})); SOCK.on('story_deleted', () => loadStories().catch(() => {}));
-  SOCK.on('connect', () => { if (cur) SOCK.emit('join_conversation', cur); });
+  let wasUp = false;
+  SOCK.on('connect', () => { if (cur) SOCK.emit('join_conversation', cur); if (wasUp) resync(); wasUp = true; }); // reconnexion : on rattrape ce qui a été manqué
 }
+// Rattrapage après coupure / retour au premier plan : conversations, messages ouverts, notifications.
+let resyncing = false;
+async function resync() {
+  if (!booted || resyncing) return; resyncing = true;
+  try {
+    await loadConvs(); renderList();
+    const c = cur && cv();
+    if (c) {
+      const keep = c.ms.filter((z) => z.pending || z.fail);
+      await loadMsgs(c);
+      keep.forEach((z) => { if (!c.ms.some((q) => q.cid && q.cid === z.cid)) c.ms.push(z); });
+      th2(); api('POST', `/api/conversations/${c.id}/seen`).catch(() => {});
+    } else if (cur) { cur = null; setCo(false); renderChat(); }
+    loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {});
+  } catch {} finally { resyncing = false; }
+}
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (!booted) return;
+  const c = cur && cv(); if (c && c.pendSeen) { c.pendSeen = 0; c.unread = 0; api('POST', `/api/conversations/${c.id}/seen`).catch(() => {}); renderList(); }
+  if (SOCK && !SOCK.connected) SOCK.connect();
+  if (hiddenAt && Date.now() - hiddenAt > 15000) resync();
+});
 
 /* ---------- Notifications ---------- */
 TY.post = ['cam', '#0A9ED9', 'a publié une nouvelle publication']; TY.system = ['bell', '#8B3EF0', 'vous a envoyé une notification']; TY.story[2] = 'a publié une story'; TY.msg = TY.msg || ['chat', '#0057FF', 'vous a envoyé un message'];
@@ -463,9 +543,32 @@ sset = ((o) => (k, v) => { if (k === 'jx-notif-pref') { api('PUT', '/api/me/prof
 function tileOf(r) {
   const img = r.mediaType === 'image' && r.mediaUrl, tx = img ? undefined : (r.content || r.description || (r.mediaType === 'video' ? 'Vidéo' : r.mediaType === 'link' ? 'Lien' : 'Publication'));
   const liked = !!r.likedByMe;
-  return { id: r.id, u: img || undefined, tx, g: ['#0057FF,#8B3EF0', '#12B886,#0B7285', '#E8590C,#D6336C', '#0A9ED9,#0057FF', '#14131A,#3B2A8F', '#D6336C,#8B3EF0'][col(r.id)], l: (r.likesCount || 0) - (liked ? 1 : 0), k: liked ? 1 : 0, sh: r.sharesCount || 0, a: r.author && r.author.username ? r.author.username : (typeof r.author === 'string' ? r.author : undefined), cap: img && r.content ? r.content.slice(0, 60) : undefined, c: 0, tg: ((r.content || '').toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || []).map((s) => s.slice(1)) };
+  return { id: r.id, mt: r.mediaType || '', mu: r.mediaUrl || '', u: img || undefined, tx, g: ['#0057FF,#8B3EF0', '#12B886,#0B7285', '#E8590C,#D6336C', '#0A9ED9,#0057FF', '#14131A,#3B2A8F', '#D6336C,#8B3EF0'][col(r.id)], l: (r.likesCount || 0) - (liked ? 1 : 0), k: liked ? 1 : 0, sh: r.sharesCount || 0, a: r.author && r.author.username ? r.author.username : (typeof r.author === 'string' ? r.author : undefined), cap: img && r.content ? r.content.slice(0, 60) : undefined, c: 0, tg: ((r.content || '').toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || []).map((s) => s.slice(1)) };
 }
 async function loadMine() { const l = await api('GET', '/api/posts/user/' + MEID + '?limit=30'); POSTS.length = 0; l.forEach((r) => POSTS.push(tileOf(r))); }
+pvShow = function () { // identique à l'original, sauf : une publication vidéo affiche la vidéo (et plus seulement le texte)
+  let v = $('#pvw');
+  if (!v) { document.body.insertAdjacentHTML('beforeend', '<div class="pvw" id="pvw" hidden role="dialog" aria-modal="true" aria-label="Publication"></div>'); v = $('#pvw'); }
+  const p = pvL[pvI]; if (!p) return;
+  const pvi = `<button class="lkb ${p.k ? 'on' : ''}" data-pg="pvl" aria-label="J’aime">${SVG(PI.heart, 'style="width:22px;height:22px"')}</button><b>${p.l + (p.k ? 1 : 0)}</b><span>${p.sh || 0} partage${(p.sh || 0) > 1 ? 's' : ''}</span>${p.a ? `<span class="pva">@${esc(p.a)}${p.cap ? ' · ' + esc(p.cap) : ''}</span>` : ''}`;
+  // même vidéo déjà affichée (simple clic sur « J'aime ») : on ne met à jour que la barre, la lecture continue
+  if (p.mt === 'video' && !v.hidden && v.dataset.pid === String(p.id) && v.querySelector('.pvi')) { v.querySelector('.pvi').innerHTML = pvi; return; }
+  v.dataset.pid = String(p.id);
+  stopAll();
+  let body;
+  if (p.mt === 'video' && p.mu) {
+    const u = p.mu, social = /(facebook|fb\.watch|tiktok|instagram|twitter|x\.com)/i.test(u);
+    const player = isEmb(u) ? embed(u)
+      : social ? `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span style="color:var(--t)">Ouvrir la vidéo</span></a>`
+      : `<video src="${esc(u)}" controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:12px"></video>`;
+    body = `<div style="width:min(720px,94vw);display:flex;flex-direction:column;align-items:center;gap:12px"><div id="pvmv" style="width:100%;${isEmb(u) ? 'aspect-ratio:16/9;' : ''}border-radius:14px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;min-height:120px">${player}</div>${p.tx && p.tx !== 'Vidéo' ? `<div style="color:#fff;font:500 15px Inter,sans-serif;text-align:center;padding:0 16px;max-width:100%;overflow-wrap:anywhere">${esc(p.tx)}</div>` : ''}</div>`;
+  } else body = p.tx ? `<div class="pvt" style="background:linear-gradient(135deg,${p.g})">${esc(p.tx)}</div>` : `<img src="${(p.u || BGURL('p' + p.i))}" alt="Publication ${pvI + 1}">`;
+  v.innerHTML = `<button class="ib pvx" data-pg="pvc" aria-label="Fermer">${PX('x')}</button>${pvI > 0 ? `<button class="ib pvn pvp" data-pg="pvp" aria-label="Précédent">${PX('back')}</button>` : ''}${pvI < pvL.length - 1 ? `<button class="ib pvn pvf" data-pg="pvn" aria-label="Suivant"><svg class="i" viewBox="0 0 24 24" style="transform:scaleX(-1)"><path d="${PI.back}"/></svg></button>` : ''}
+<div class="pvb">${body}<div class="pvi">${pvi}</div></div>`;
+  v.hidden = false; document.body.classList.add('pvo');
+  const mv = $('#pvmv'); if (mv) noPip(mv);
+};
+{ const _pvc = pvClose; pvClose = function () { const v = $('#pvw'); _pvc(); if (v) { v.innerHTML = ''; delete v.dataset.pid; } }; } // fermer = la vidéo s'arrête
 pList = function () { return pTab === 'posts' ? POSTS : pTab === 'media' ? POSTS.filter((p) => !p.tx) : pTab === 'likes' ? LIKES : SAVED; };
 pView = function (j, src) { pvL = src === 'user' ? USERP : src === 'exp' ? XL : pTab === 'posts' || src === 'posts' ? POSTS : src === 'media' ? POSTS.filter((p) => !p.tx) : src === 'likes' ? LIKES : SAVED; pvI = j; pvShow(true); };
 document.addEventListener('click', async (e) => {
@@ -599,6 +702,37 @@ document.addEventListener('click', async (e) => {
 let ipr = null; addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); ipr = e; });
 document.addEventListener('click', (e) => { if (!e.target.closest('#inst')) return; e.stopImmediatePropagation(); e.preventDefault(); if (ipr) { ipr.prompt(); ipr = null; } else T('Utilisez « Ajouter à l’écran d’accueil » dans le menu de votre navigateur.'); }, true);
 addEventListener('online', () => { if (booted) loadConvs().then(renderList).catch(() => {}); });
+
+/* ---------- Thème : une seule bascule par clic + lune <-> soleil ---------- */
+const ICO_MOON = '<path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>';
+const ICO_SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+function themeIcons() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  document.querySelectorAll('#thm svg, button[onclick="th()"] svg').forEach((v) => { v.innerHTML = dark ? ICO_SUN : ICO_MOON; });
+  document.querySelectorAll('#thm, button[onclick="th()"]').forEach((b) => { b.title = dark ? 'Passer en mode clair' : 'Passer en mode sombre'; });
+}
+document.addEventListener('click', (e) => { // le onclick d'origine + le gestionnaire délégué basculaient 2 fois : on n'en garde qu'un
+  const b = e.target.closest('button[onclick="th()"]'); if (!b) return;
+  e.stopImmediatePropagation(); e.preventDefault(); th();
+}, true);
+new MutationObserver(themeIcons).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+themeIcons();
+
+/* ---------- Bannière « notifications » : ne revient plus une fois la réponse donnée ---------- */
+const PB = 'jx-pushb';
+const pbGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const pbSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+{
+  const later = +pbGet(PB + '-later') || 0;
+  const answered = pbGet(PB) === 'done' || (later && Date.now() - later < 7 * 864e5) || ('Notification' in window && Notification.permission !== 'default');
+  const b = q$('#pushb'); if (answered && b) b.remove();
+}
+document.addEventListener('click', (e) => {
+  const x = e.target.closest('[data-pa]'); if (!x) return;
+  if (x.dataset.pa === 'n') pbSet(PB + '-later', String(Date.now()));   // « Plus tard » : on redemande dans 7 jours
+  else pbSet(PB, 'done');                                                // « Activer » : réponse donnée, plus de bannière
+}, true);
+
 
 /* ---------- Démarrage ---------- */
 (async () => {

@@ -7,6 +7,7 @@ let MEID = null, SOCK = null, STG = [], LIKES = [], SAVED = [], booted = false, 
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const col = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 6; };
 const ago = (t) => { const s = (Date.now() - +new Date(t)) / 1000; if (s < 60) return 'à l’instant'; if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h'; if (s < 172800) return 'hier'; return new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
+const seenTxt = (t) => { if (!t) return ''; const s = (Date.now() - t) / 1000; if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date().toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(Date.now() - 864e5).toDateString()) return 'vu hier'; return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
 const copy = (t, m) => { try { navigator.clipboard.writeText(t).then(() => T(m)); } catch { T(t); } };
 
 async function api(m, u, b) {
@@ -264,7 +265,7 @@ function mapConv(x) {
   let c = D.find((z) => z.id === x.id); if (!c) { c = { id: x.id, ms: [], unread: 0, k: 0 }; D.push(c); }
   x.members.forEach(reg); const o = x.otherUser;
   Object.assign(c, { type: x.type, name: x.name, unread: x.unreadCount || 0, ids: x.members.map((m) => m.id), mem: x.members.map((m) => m.username), owner: String(x.owner) === String(MEID) ? 1 : 0, other: o ? o.id : null, k: col(x.name), bgSrv: x.background });
-  if (o) { o.isOnline ? ONL.add(o.username) : ONL.delete(o.username); c.seen = o.lastSeen ? 'vu ' + ago(o.lastSeen) : ''; }
+  if (o) { o.isOnline ? ONL.add(o.username) : ONL.delete(o.username); c.ls = o.lastSeen ? +new Date(o.lastSeen) : 0; c.seen = seenTxt(c.ls); }
   applyBg(c, x.background);
   if (!c.loaded && x.lastMessage && x.lastMessage.createdAt && Date.now() - +new Date(x.lastMessage.createdAt) < 5 * 864e5) { const l = x.lastMessage; c.ms = [{ id: 'lm' + x.id, f: String(l.senderId) === String(MEID) ? 'me' : (c.name), x: l.content || '', type: ptype(l.type), t: +new Date(l.createdAt), a: 0, stub: 1, r: {} }]; }
   return c;
@@ -400,10 +401,11 @@ document.addEventListener('input', (e) => { // « écrit… »
   clearTimeout(typT); typT = setTimeout(() => { typT = 0; SOCK.emit('typing_stop', { conversationId: cur }); }, 2500);
 });
 
+setInterval(() => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); const c = cur && cv(); if (c) { const s = $('#st'); if (s && !c.ty) s.textContent = status(c); } }, 30000);
 /* ---------- Temps réel ---------- */
 function connectSocket() {
   if (SOCK) SOCK.disconnect(); if (typeof io === 'undefined') return;
-  SOCK = io({ withCredentials: true });
+  SOCK = io({ withCredentials: true, transports: ['websocket', 'polling'], reconnectionDelay: 500, reconnectionDelayMax: 3000 });
   const cOf = (id) => D.find((c) => c.id === String(id));
   SOCK.on('new_message', async (msg) => {
     let c = cOf(msg.conversationId);
@@ -424,7 +426,7 @@ function connectSocket() {
   SOCK.on('messages_seen', (r) => { const c = cOf(r.conversationId); if (c && String(r.userId) !== String(MEID)) { c.ms.forEach((m) => { if (m.f === 'me') m.seen = 1; }); if (cur === c.id) th2(); } });
   SOCK.on('user_typing', (r) => { const c = cOf(r.conversationId); if (!c) return; c.ty = r.username; if (cur === c.id) typ(true); clearTimeout(c.tt); c.tt = setTimeout(() => { c.ty = null; if (cur === c.id) typ(false); }, 4000); });
   SOCK.on('user_stopped_typing', (r) => { const c = cOf(r.conversationId); if (c) { c.ty = null; if (cur === c.id) typ(false); } });
-  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on && r.lastSeen) c.seen = 'vu ' + ago(r.lastSeen); renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } loadOnline().catch(() => {}); };
+  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 2000); };
   SOCK.on('user_online', pres(true)); SOCK.on('user_offline', pres(false));
   const refresh = () => loadConvs().then(() => { renderList(); if (cur && !cv()) { cur = null; setCo(false); renderChat(); } }).catch(() => {});
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));
@@ -465,7 +467,7 @@ function tileOf(r) {
 }
 async function loadMine() { const l = await api('GET', '/api/posts/user/' + MEID + '?limit=30'); POSTS.length = 0; l.forEach((r) => POSTS.push(tileOf(r))); }
 pList = function () { return pTab === 'posts' ? POSTS : pTab === 'media' ? POSTS.filter((p) => !p.tx) : pTab === 'likes' ? LIKES : SAVED; };
-pView = function (j, src) { pvL = src === 'exp' ? XL : pTab === 'posts' || src === 'posts' ? POSTS : src === 'media' ? POSTS.filter((p) => !p.tx) : src === 'likes' ? LIKES : SAVED; pvI = j; pvShow(true); };
+pView = function (j, src) { pvL = src === 'user' ? USERP : src === 'exp' ? XL : pTab === 'posts' || src === 'posts' ? POSTS : src === 'media' ? POSTS.filter((p) => !p.tx) : src === 'likes' ? LIKES : SAVED; pvI = j; pvShow(true); };
 document.addEventListener('click', async (e) => {
   const x = e.target.closest('[data-pg="ptab"]'); if (!x) return; const t = x.dataset.t; if (t !== 'likes' && t !== 'saved') return;
   try { const l = await api('GET', t === 'likes' ? '/api/me/likes' : '/api/me/saved'); const a = l.map((r) => tileOf({ ...r, author: r.author })); if (t === 'likes') { LIKES = a.map((p) => ({ ...p, k: 1, l: p.l })); } else SAVED = a; if (pTab === t) $('#pg2').innerHTML = pGrid(); } catch (er) { T(er.message); }
@@ -500,6 +502,27 @@ function squareAvatar(file) {
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-pg="pavrm"]')) api('DELETE', '/api/me/avatar').then(() => { AVM[ME] = ''; paintMe(); }).catch((x) => T(x.message)); }, true);
 
+/* ---------- Profil d'un autre utilisateur ---------- */
+let USERP = [];
+const covOf = (c) => /^p\d$/.test(c) ? `linear-gradient(rgba(0,0,0,.05),rgba(0,0,0,.25)),url('${BGURL(c)}') center/cover` : ((PCV.find((x) => x[0] === c) || PCV[0])[1]);
+async function openUser(name) {
+  if (name === ME) return go('prof');
+  try {
+    const p = await api('GET', '/api/profile/u/' + encodeURIComponent(name)); reg({ id: p.id, username: p.username, avatarUrl: p.avatarUrl });
+    let l = []; try { l = await api('GET', '/api/posts/user/' + p.id + '?limit=30'); } catch {}
+    USERP = l.map(tileOf);
+    const priv = p.priv && !p.following && !USERP.length;
+    openS(`<div class="pgw prof" style="border:0;min-height:0;background:none"><div class="pcov" style="background:${covOf(p.cover)};border-radius:16px"></div><div class="phead"><div class="pav" style="cursor:default">${av(p.username, col(p.username))}</div><div class="pbtns"><button class="pub2 pbm" data-uf="${esc(p.username)}">${p.following ? 'Abonné' : 'Suivre'}</button><button class="chip" data-um="${esc(p.username)}"><span style="color:var(--t)">Message</span></button></div></div><div class="pinfo"><h1>${esc(p.name)}${p.priv ? `<span class="plk">${PX('lock')}</span>` : ''}</h1><div class="phd">@${esc(p.username)}</div>${p.bio ? `<p class="pbio">${esc(p.bio)}</p>` : ''}<div class="pmeta">${p.loc ? `<span>${PX('pin')}${esc(p.loc)}</span>` : ''}${p.site ? `<a href="${esc(p.site)}" target="_blank" rel="noopener noreferrer">${PX('link')}${esc(p.site.replace(/^https?:\/\//, ''))}</a>` : ''}</div></div><div class="pstats"><div><b>${p.stats.posts}</b><span>Publications</span></div><div><b>${fmtN(p.stats.likes)}</b><span>J’aime</span></div><div><b>${p.stats.followers}</b><span>Abonnés</span></div></div>${priv ? `<div class="empty2"><div class="eic">${PX('lock')}</div><b>Compte privé</b><span>Abonnez-vous pour voir ses publications.</span></div>` : USERP.length ? `<div class="pgrid">${USERP.map((x, i) => tile(x, i, 'user')).join('')}</div>` : `<div class="empty2"><b>Aucune publication</b></div>`}</div>`);
+  } catch (e) { T(e.message); }
+}
+document.addEventListener('click', async (e) => {
+  let x;
+  if ((x = e.target.closest('[data-uf]'))) { e.stopImmediatePropagation(); const n = x.dataset.uf; try { const r = await api('POST', '/api/follow/' + UID[n]); r.following ? FOL.add(n) : FOL.delete(n); x.textContent = r.following ? 'Abonné' : 'Suivre'; } catch (er) { T(er.message); } return; }
+  if ((x = e.target.closest('[data-um]'))) { e.stopImmediatePropagation(); CL(); dm(x.dataset.um); return; }
+  const h = e.target.closest('.post .ph, .shared .ph');
+  if (h && !e.target.closest('.more,.pop') && h.querySelector('b')) { e.stopImmediatePropagation(); e.preventDefault(); return openUser(h.querySelector('b').textContent.trim()); }
+  if ((x = e.target.closest('.xac, .xr')) && !e.target.closest('.nf,button.go')) { const b = x.querySelector('b'); if (b) { e.stopImmediatePropagation(); e.preventDefault(); openUser(b.textContent.trim()); } }
+}, true);
 /* ---------- Compte ---------- */
 async function loadSessions() {
   const l = await api('GET', '/api/sessions');

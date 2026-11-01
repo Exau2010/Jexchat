@@ -64,6 +64,23 @@ function mount(app, sec, io, db) {
     res.sendFile(path.join(__dirname, 'jex-live.js'));
   });
 
+  // ── Profil public d'un autre utilisateur ──
+  app.get('/api/profile/u/:username', sec.requireAuth, async (req, res) => {
+    try {
+      const r = sec.validateUsername(req.params.username);
+      if (!r.valid) return res.status(400).json({ error: 'Pseudo invalide.' });
+      const u = await db.User.findOne({ username: r.value }).lean();
+      if (!u || u.isBanned) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+      const [p, posts, followers, following, isF] = await Promise.all([
+        Profile.findOne({ userId: u._id }).select('-avatar').lean(),
+        db.Post.find({ authorId: u._id, deleted: false }).select('likesCount').lean(),
+        Follow.countDocuments({ to: u._id }), Follow.countDocuments({ from: u._id }),
+        Follow.exists({ from: req.user._id, to: u._id }),
+      ]);
+      return res.json({ id: u._id, username: u.username, avatarUrl: u.avatarUrl || '', ...pub(p || {}), name: (p && p.name) || u.username, isMe: String(u._id) === String(req.user._id), following: !!isF, stats: { posts: posts.length, likes: posts.reduce((x, y) => x + (y.likesCount || 0), 0), followers, following } });
+    } catch (e) { return res.status(500).json({ error: 'Erreur.' }); }
+  });
+
   // ── Mon profil ──
   async function myProfile(req) {
     const uid = req.user._id;

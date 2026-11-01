@@ -100,20 +100,21 @@ $('#sites').innerHTML = SITES.map((s) => `<div class="sr"><div class="xs"><div c
 const VER = '<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="11" fill="#0057FF"/><path d="m7 12.5 3 3 7-7" stroke="#fff" stroke-width="2.4" fill="none"/></svg>';
 const ptxt = (s) => lin(esc(s || '')).replace(/(^|\s)(#[\p{L}\p{N}_]{2,30})/gu, '$1<a class="htag" href="#" data-q="$2">$2</a>');
 const host = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
+const YT = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/|v\/))([\w-]{11})/;
 function embed(u) {
   let m;
-  if ((m = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/))) return `<iframe src="https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
+  if ((m = u.match(YT))) return `<iframe referrerpolicy="strict-origin-when-cross-origin" src="https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
   if ((m = u.match(/vimeo\.com\/(\d+)/))) return `<iframe src="https://player.vimeo.com/video/${m[1]}?autoplay=1" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;min-height:200px;border:0;border-radius:12px"></iframe>`;
   return `<video src="${esc(u)}" controls autoplay playsinline style="width:100%;max-height:420px;border-radius:12px"></video>`;
 }
-const ytid = (u) => { const m = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/); return m && m[1]; };
+const ytid = (u) => { const m = u.match(YT); return m && m[1]; };
 const thumb = (u) => { const y = ytid(u); return y ? `<img src="https://img.youtube.com/vi/${y}/hqdefault.jpg" alt="" referrerpolicy="no-referrer">` : `<div style="background:linear-gradient(135deg,#0b1030,#2b2f8f 60%,#8b3ef0);display:grid;place-items:center;color:#9fb4ff;font:600 16px monospace;padding:16px;text-align:center">${esc(host(u))}</div>`; };
 const isEmb = (u) => /youtu\.?be|vimeo\.com|\.(mp4|webm|ogg)(\?|$)/i.test(u);
 media = function (p) {
   const r = p.raw; if (!r) return '';
   const one = (o) => {
     if (o.mediaType === 'image') return `<div class="media"><img data-u="${esc(o.mediaUrl)}" src="${esc(o.mediaUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>`;
-    if (o.mediaType === 'video' && /\.(mp4|webm|ogg)(\?|$)/i.test(o.mediaUrl)) return `<div class="media"><video src="${esc(o.mediaUrl)}#t=0.1" controls playsinline preload="metadata" style="background:#000"></video></div>`;
+    if (o.mediaType === 'video' && !isEmb(o.mediaUrl) && !/(facebook|fb\.watch|tiktok|instagram|twitter|x\.com)/i.test(o.mediaUrl)) return `<div class="media"><video src="${esc(o.mediaUrl)}#t=0.1" data-u="${esc(o.mediaUrl)}" controls playsinline preload="metadata" style="background:#000"></video></div>`;
     if (o.mediaType === 'video' && isEmb(o.mediaUrl)) return `<div class="media" data-vu="${esc(o.mediaUrl)}">${thumb(o.mediaUrl)}<button class="play" aria-label="Lire la vidéo"><span>${ic('play', 'style="fill:#fff;margin-left:3px"')}</span></button><span class="tag">Vidéo</span></div>`;
     if (o.mediaType === 'video' || o.mediaType === 'link') return `<a class="lk" href="${esc(o.mediaUrl)}" target="_blank" rel="noopener noreferrer" style="--c:linear-gradient(135deg,${o.mediaType === 'video' ? '#8B3EF0,#0057FF' : '#12b886,#0b7285'})"><div class="th">${ic(o.mediaType === 'video' ? 'play' : 'ext')}</div><div><small>${esc(host(o.mediaUrl))}</small><b>${o.mediaType === 'video' ? 'Vidéo' : 'Lien'}</b><small>${esc(o.mediaUrl)}</small></div></a>`;
     return '';
@@ -317,15 +318,16 @@ sendImg = async function () {
   const c = cv(), cap = $('#cap').value.trim(), w = $('#pgw'), p = $('#pgi'), file = window.__jxFile; if (!file) return T('Image introuvable.');
   w.hidden = false; p.style.width = '40%';
   try {
-    const bl = await shrink(file, 1600, .85);
-    const r = await fetch(`/api/conversations/${c.id}/images`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: bl });
+    let bl, ct = 'image/jpeg';
+    try { bl = await shrink(pend.data, 1600, .85); } catch { if (/^image\/(jpeg|png|webp)$/.test(file.type) && file.size <= 5e6) { bl = file; ct = file.type; } else throw new Error('Format d’image non pris en charge (JPEG, PNG ou WebP).'); }
+    const r = await fetch(`/api/conversations/${c.id}/images`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': ct }, body: bl });
     const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Envoi impossible.');
     p.style.width = '100%'; const m = mm('me', cap, 0, { type: 'image', url: pend.data, t: Date.now(), imageId: d.imageId }); pend = null; bars(); push(c, m);
   } catch (e) { T(e.message); pend = null; bars(); }
   setTimeout(() => { w.hidden = true; p.style.width = '0'; }, 400);
 };
-function shrink(file, max, qual) {
-  return new Promise((ok, ko) => { const im = new Image(), u = URL.createObjectURL(file); im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), cn = document.createElement('canvas'); cn.width = Math.round(im.width * k); cn.height = Math.round(im.height * k); cn.getContext('2d').drawImage(im, 0, 0, cn.width, cn.height); URL.revokeObjectURL(u); cn.toBlob((b) => (b ? ok(b) : ko(new Error('Image illisible.'))), 'image/jpeg', qual); }; im.onerror = () => ko(new Error('Image illisible.')); im.src = u; });
+function shrink(src, max, qual) {
+  return new Promise((ok, ko) => { const im = new Image(), u = src; im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), cn = document.createElement('canvas'); cn.width = Math.round(im.width * k); cn.height = Math.round(im.height * k); cn.getContext('2d').drawImage(im, 0, 0, cn.width, cn.height); cn.toBlob((b) => (b ? ok(b) : ko(new Error('Image illisible.'))), 'image/jpeg', qual); }; im.onerror = () => ko(new Error('Image illisible.')); im.src = u; });
 }
 document.addEventListener('change', (e) => { // conserve le fichier pour l'envoi réel (le gestionnaire d'origine garde l'aperçu)
   if (e.target.id !== 'fi') return; const f = e.target.files[0]; if (f) window.__jxFile = f;
@@ -377,6 +379,7 @@ gl = function () {
     box.innerHTML = l.filter((u) => u.username !== ME && !ex.includes(u.username)).map((u) => `<button class="cand ${gs.has(u.username) ? 'sel' : ''}" data-cand="${esc(u.username)}"><div class="xs">${av(u.username, col(u.username))}</div><b>${esc(u.username)}</b><i class="mc">${ic('check')}</i></button>`).join('') || '<div class="empt">Aucun résultat.</div>';
   }, 200);
 };
+addEventListener('error', (e) => { const v = e.target; if (v && v.tagName === 'VIDEO' && v.dataset.u && v.parentNode) v.parentNode.outerHTML = `<a class="lk" href="${esc(v.dataset.u)}" target="_blank" rel="noopener noreferrer" style="--c:linear-gradient(135deg,#8B3EF0,#0057FF)"><div class="th">${ic('play')}</div><div><small>${esc(host(v.dataset.u))}</small><b>Ouvrir la vidéo</b></div></a>`; }, true);
 // lecteurs audio / vidéo des messages
 document.addEventListener('click', (e) => {
   let x = e.target.closest('[data-au]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { if (!x.__a) { x.__a = new Audio(m.url); x.__a.onended = () => x.classList.remove('pl'); } x.classList.contains('pl') ? x.__a.pause() : x.__a.play().catch(() => T('Lecture impossible.')); } return; }
@@ -536,7 +539,7 @@ document.addEventListener('input', (e) => {
 });
 let lastV = 'home';
 const _go = go;
-go = function (v, id) { if (lastV === 'notif' && v !== 'notif' && booted) { api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {}); NT.length = 0; nBadge(); } lastV = v; _go(v, id); if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
+go = function (v, id) { if (lastV === 'notif' && v !== 'notif' && booted) { api('POST', '/api/notifs/state', { all: true, read: true }).catch(() => {}); NT.length = 0; nBadge(); } lastV = v; _go(v, id); document.querySelectorAll('.shell>main').forEach((m) => { m.scrollTop = 0; }); if (!booted) return; if (v === 'exp' && !go.xe) { go.xe = 1; loadExplore().then(() => { if (!$('#vx').hidden) renderExp(); }).catch(() => { go.xe = 0; }); } if (v === 'prof') loadProfile().then(() => { renderProf(); }).catch(() => {}); if (v === 'notif') loadNotifs().then(() => renderNotif(true)).catch(() => {}); if (v === 'home') loadOnline().catch(() => {}); };
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];

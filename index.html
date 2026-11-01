@@ -300,6 +300,27 @@ body{overflow-x:clip;max-width:100%;min-height:100dvh}
 .toast{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 }
 @media(max-width:380px){.top .ib{width:40px;height:40px}.pt{font-size:15px}}
+</style><style id="jx-fit2">
+.play{background:none!important}
+.play span{background:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;box-shadow:none!important;width:auto!important;height:auto!important}
+.play span svg{width:54px;height:54px;filter:drop-shadow(0 2px 8px rgba(0,0,0,.65))}
+.media>img,.media>video{filter:none!important}
+img,video,iframe{max-width:100%}
+@media(max-width:700px){
+html,body{height:100%;overflow:hidden!important;overscroll-behavior:none}
+body{position:fixed;inset:0;width:100%;padding-top:0!important}
+.shell{display:block;height:100%;padding:0 6px;overflow:hidden}
+.shell>main{height:100%;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))!important;min-width:0}
+.shell>main.pg{padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))!important}
+body.vm .shell>main.mainm{overflow:visible;height:auto;padding-bottom:0!important}
+.shell>main[hidden]{display:none!important}
+.top{top:0;padding-top:calc(8px + env(safe-area-inset-top,0px))}
+.pgh{top:0}
+.shell,.shell>main,.card,.post,.pgw,.stories{max-width:100%;min-width:0}
+.post *{max-width:100%}
+.bn{position:fixed!important;bottom:0;left:0;right:0;z-index:30}
+.ai{z-index:31}
+}
 </style></head><body>
 <div class="net" id="net" role="status">Vous êtes hors ligne — le fil se synchronisera au retour du réseau.</div>
 <div class="shell">

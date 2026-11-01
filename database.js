@@ -159,7 +159,7 @@ messageSchema.index({ pinned: 1, conversationId: 1 });
 // --- Notification ---
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  type: { type: String, enum: ['message', 'group_invite', 'mention', 'system', 'story', 'post', 'like'], default: 'message' },
+  type: { type: String, enum: ['message', 'group_invite', 'mention', 'system', 'story', 'post', 'like', 'follow', 'share', 'comment'], default: 'message' },
   fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation' },
   messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },

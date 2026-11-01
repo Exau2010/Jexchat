@@ -14,6 +14,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./database.js');
 const sec = require('./security.js');
 const chatMedia = require('./chat-media.js');
+const protoApi = require('./proto-api.js');
 
 const app = express();
 // Render (et tout hébergeur derrière un reverse proxy) : sans ceci, req.ip est l'IP du proxy,
@@ -127,6 +128,7 @@ const jexcity = require('./city-server.js');
 jexcity.mountStatic(app);
 
 app.use(sec.apiLimiter);
+protoApi.early(app, sec, db);
 
 // JexAi (module additif) : POST /api/jexai, GET /api/jexai/status
 require('./jexai.js').mount(app, sec);
@@ -2136,6 +2138,7 @@ async function enrichConversations(convs, currentUserId) {
 }
 
 chatMedia.mount(app, sec, io, db);
+protoApi.mount(app, sec, io, db);
 
 // ─── Cleanup Jobs ──────────────────────────────────────────────────────────────
 setInterval(async () => {

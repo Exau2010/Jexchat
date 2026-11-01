@@ -295,7 +295,7 @@ async function sendOut(c, m) {
   m.pending = 1; m.cid = m.cid || rid();
   try {
     const b = { type: m.type === 'sp' ? 'shared_post' : m.type, clientId: m.cid, content: m.x };
-    if (['image', 'video', 'audio', 'link'].includes(m.type)) { b.url = m.url; b.content = m.type === 'link' ? '' : m.x; }
+    if (['image', 'video', 'audio', 'link'].includes(m.type)) { if (!m.imageId) b.url = m.url; b.content = m.type === 'link' ? '' : m.x; }
     if (m.imageId) b.imageId = m.imageId;
     if (m.rpId) b.replyTo = m.rpId;
     const r = await api('POST', `/api/conversations/${c.id}/messages`, b); adopt(c, m, r.id);
@@ -380,14 +380,20 @@ gl = function () {
   }, 200);
 };
 addEventListener('error', (e) => { const v = e.target; if (v && v.tagName === 'VIDEO' && v.dataset.u && v.parentNode) v.parentNode.outerHTML = `<a class="lk" href="${esc(v.dataset.u)}" target="_blank" rel="noopener noreferrer" style="--c:linear-gradient(135deg,#8B3EF0,#0057FF)"><div class="th">${ic('play')}</div><div><small>${esc(host(v.dataset.u))}</small><b>Ouvrir la vidéo</b></div></a>`; }, true);
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-dl]'); if (!b) return; e.stopImmediatePropagation(); e.preventDefault();
+  const u = b.dataset.dl;
+  try { const r = await fetch(u, { credentials: 'same-origin' }); if (!r.ok) throw 0; const bl = await r.blob(), a = document.createElement('a'); a.href = URL.createObjectURL(bl); a.download = 'jexchat-image.' + ((bl.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+  catch { if (/^data:/.test(u)) { const a = document.createElement('a'); a.href = u; a.download = 'jexchat-image.jpg'; document.body.append(a); a.click(); a.remove(); } else window.open(u, '_blank', 'noopener'); }
+}, true);
 // lecteurs audio / vidéo des messages
 document.addEventListener('click', (e) => {
   let x = e.target.closest('[data-au]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { if (!x.__a) { x.__a = new Audio(m.url); x.__a.onended = () => x.classList.remove('pl'); } x.classList.contains('pl') ? x.__a.pause() : x.__a.play().catch(() => T('Lecture impossible.')); } return; }
   x = e.target.closest('[data-play]'); if (x && x.closest('.mw')) { const m = gm(x.closest('.mw').dataset.id); if (m && m.url) { e.stopImmediatePropagation(); x.outerHTML = `<div class="vd" style="cursor:default;overflow:hidden;width:min(320px,100%);aspect-ratio:16/9">${embed(m.url)}</div>`; } }
 }, true);
 const _mh = mh;
-mh = function (c, m, p) { // photo du partage de publication
-  let h = _mh(c, m, p); if (m.type === 'sp' && m.pimg) h = h.replace(/<img src="[^"]*" alt="">/, `<img src="${esc(m.pimg)}" alt="">`); return h;
+mh = function (c, m, p) { // photo du partage de publication + téléchargement
+  let h = _mh(c, m, p); if (m.type === 'image' && !m.del && m.url) h = h.replace(/(<img [^>]*>)/, `$1<button class="chip dlb" data-dl="${esc(m.url)}"><span style="color:var(--t)">⬇ Télécharger</span></button>`); if (m.type === 'sp' && m.pimg) h = h.replace(/<img src="[^"]*" alt="">/, `<img src="${esc(m.pimg)}" alt="">`); return h;
 };
 document.addEventListener('input', (e) => { // « écrit… »
   if (e.target.id !== 'mi' || !SOCK || !cur) return; if (!typT) SOCK.emit('typing_start', { conversationId: cur });

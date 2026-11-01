@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const db = require('./database.js');
@@ -1736,6 +1737,28 @@ app.delete('/api/posts/:id', sec.requireAuth, async (req, res) => {
 
 // ─── Admin Routes ──────────────────────────────────────────────────────────────
 const adminAuth = [sec.requireAuth, sec.requireRole(['ADMIN', 'OWNER', 'MODERATOR'])];
+
+// Configuration du site gérée par les admins : sites suggérés (barre latérale) et fonds de discussion.
+const SiteConfig = mongoose.models.SiteConfig || mongoose.model('SiteConfig', new mongoose.Schema({ key: { type: String, unique: true }, value: mongoose.Schema.Types.Mixed }, { minimize: false }));
+const cfgUrl = (u) => { try { const x = new URL(String(u || '').trim()); return x.protocol === 'https:' && x.href.length <= 500 && !/['"()\\\s]/.test(x.href) ? x.href : null; } catch { return null; } };
+const cfgTxt = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, ' ').trim().slice(0, n);
+const cleanSiteConfig = (b) => ({
+  sites: (Array.isArray(b && b.sites) ? b.sites : []).slice(0, 30).map((x) => ({ title: cfgTxt(x && x.title, 60), url: cfgUrl(x && x.url), desc: cfgTxt(x && x.desc, 160) })).filter((x) => x.title && x.url),
+  bgs: (Array.isArray(b && b.bgs) ? b.bgs : []).slice(0, 30).map((x) => ({ name: cfgTxt(x && x.name, 30), url: cfgUrl(x && x.url) })).filter((x) => x.name && x.url),
+});
+app.get('/api/site-config', sec.requireAuth, async (req, res) => {
+  try {
+    const d = await SiteConfig.findOne({ key: 'main' }).lean(), v = (d && d.value) || {}, roles = req.user.roles || [];
+    return res.json({ sites: v.sites || [], bgs: v.bgs || [], staff: roles.some((r) => ['ADMIN', 'OWNER', 'MODERATOR'].includes(r)), admin: roles.some((r) => ['ADMIN', 'OWNER'].includes(r)) });
+  } catch (err) { console.error('[SiteConfig] get', err.message); return res.status(500).json({ error: 'Erreur.' }); }
+});
+app.put('/api/admin/site-config', sec.requireAuth, sec.requireRole(['ADMIN', 'OWNER']), async (req, res) => {
+  try {
+    const v = cleanSiteConfig(req.body);
+    await SiteConfig.updateOne({ key: 'main' }, { $set: { value: v } }, { upsert: true });
+    return res.json(v);
+  } catch (err) { console.error('[SiteConfig] put', err.message); return res.status(500).json({ error: 'Erreur.' }); }
+});
 
 app.get('/api/admin/users', ...adminAuth, async (req, res) => {
   try {

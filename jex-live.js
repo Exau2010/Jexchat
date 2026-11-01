@@ -85,7 +85,8 @@ document.addEventListener('click', (e) => {
 
 /* ---------- Chargement des données ---------- */
 async function bootData() {
-  await Promise.allSettled([loadFollows(), loadConvs(), loadFeed(true), loadStories(), loadNotifs(), loadOnline(), loadMine(), loadExplore()]);
+  await Promise.allSettled([loadFollows(), loadConvs(), loadFeed(true), loadStories(), loadNotifs(), loadOnline(), loadMine(), loadExplore(), loadCfg()]);
+  D.forEach((c) => applyBg(c, c.bgSrv));
   renderList(); renderNotif(); renderProf(); nBadge();
 }
 async function loadFollows() { const f = await api('GET', '/api/follow/mine'); FOL.clear(); f.following.forEach((u) => { reg(u); FOL.add(u.username); }); f.followers.forEach(reg); }
@@ -96,6 +97,36 @@ async function loadOnline() {
 }
 const SITES = [['FastDL', 'fastdl.app', 'Télécharger des photos et vidéos Instagram', '#f58529,#dd2a7b'], ['FDown', 'fdown.net', 'Télécharger des vidéos Facebook', '#1877f2,#0b4fb3'], ['Gratos', 'gratos.app', 'Un site gratuit à découvrir', '#12b886,#0b7285'], ['Onread', 'onread.com', 'Un site gratuit à découvrir', '#7950f2,#4c2fb8'], ['Discover Profile', 'discoverprofile.com', 'Un site gratuit à découvrir', '#fa5252,#c2255c']];
 $('#sites').innerHTML = SITES.map((s) => `<div class="sr"><div class="xs"><div class="av" style="--c:linear-gradient(135deg,${s[3]});border-radius:12px">${s[0][0]}</div></div><div><b>${s[0]}</b><small>${s[2]}</small></div><a class="go" href="https://${s[1]}" target="_blank" rel="noopener noreferrer" aria-label="Visiter ${s[0]}">Visiter</a></div>`).join('');
+
+/* ---------- Configuration admin : sites suggérés + fonds de discussion + panneau ---------- */
+let CFG = { sites: [], bgs: [], staff: false, admin: false }; const BG0 = BG.length, GR = ['#f58529,#dd2a7b', '#1877f2,#0b4fb3', '#12b886,#0b7285', '#7950f2,#4c2fb8', '#0057FF,#8B3EF0'];
+function paintSites() {
+  const l = CFG.sites.length ? CFG.sites.map((x, i) => [x.title, x.url, x.desc, GR[i % GR.length]]) : SITES.map((x) => [x[0], 'https://' + x[1], x[2], x[3]]);
+  $('#sites').innerHTML = l.map((x) => `<div class="sr"><div class="xs"><div class="av" style="--c:linear-gradient(135deg,${x[3]});border-radius:12px">${esc(x[0][0])}</div></div><div><b>${esc(x[0])}</b><small>${esc(x[2])}</small></div><a class="go" href="${esc(x[1])}" target="_blank" rel="noopener noreferrer" aria-label="Visiter ${esc(x[0])}">Visiter</a></div>`).join('');
+}
+function applyCfgBgs() { BG.length = BG0; CFG.bgs.forEach((b) => BG.push([b.name, '', null, null, b.url])); }
+async function loadCfg() { try { CFG = await api('GET', '/api/site-config'); } catch { return; } paintSites(); applyCfgBgs(); }
+window.JXADM = { row: () => (CFG.staff ? `<button class="arow" data-adm>${PX('lock')}Administration</button>` : '') };
+function admHtml() {
+  const sites = CFG.sites.map((x, i) => `<div class="sr"><div><b>${esc(x.title)}</b><small>${esc(x.desc)}</small></div><button class="chip" data-adm-del="s${i}">Supprimer</button></div>`).join('') || '<p class="adm-s">Aucun site ajouté : la liste par défaut est affichée.</p>';
+  const bgs = CFG.bgs.map((b, i) => `<div class="sr"><div class="xs"><div class="av" style="background:url('${esc(b.url)}') center/cover;border-radius:10px"></div></div><div><b>${esc(b.name)}</b></div><button class="chip" data-adm-del="b${i}">Supprimer</button></div>`).join('') || '<p class="adm-s">Aucun fond ajouté.</p>';
+  return `<h3>Administration</h3><a class="arow" href="/admin">Modération : signalements et utilisateurs</a>` + (CFG.admin ? `<h4>Sites suggérés (barre latérale)</h4>${sites}<input class="adm-in" id="as-t" maxlength="60" placeholder="Nom du site"><input class="adm-in" id="as-u" type="url" inputmode="url" placeholder="https://…"><input class="adm-in" id="as-d" maxlength="160" placeholder="Description courte"><button class="pub2" data-adm-add="s">Ajouter le site</button><h4>Fonds d’écran de discussion</h4>${bgs}<input class="adm-in" id="ab-n" maxlength="30" placeholder="Nom du fond"><input class="adm-in" id="ab-u" type="url" inputmode="url" placeholder="https://… lien de l’image"><button class="pub2" data-adm-add="b">Ajouter le fond</button><p class="er" id="adm-e" role="alert"></p>` : '<p class="adm-s">Seuls les administrateurs modifient les sites et les fonds.</p>');
+}
+async function admSave(next) {
+  try { const r = await api('PUT', '/api/admin/site-config', next); CFG.sites = r.sites; CFG.bgs = r.bgs; paintSites(); applyCfgBgs(); openS(admHtml()); T('Enregistré'); }
+  catch (x) { const e = $('#adm-e'); if (e) e.textContent = x.message; else T(x.message); }
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-adm]')) return openS(admHtml());
+  const d = e.target.closest('[data-adm-del]'), a = e.target.closest('[data-adm-add]');
+  if (d) { const k = d.dataset.admDel[0], i = +d.dataset.admDel.slice(1); return admSave({ sites: CFG.sites.filter((_, j) => k !== 's' || j !== i), bgs: CFG.bgs.filter((_, j) => k !== 'b' || j !== i) }); }
+  if (a) {
+    const v = (id) => ($(id).value || '').trim(), s = a.dataset.admAdd === 's', u = v(s ? '#as-u' : '#ab-u'), er = $('#adm-e');
+    try { if (new URL(u).protocol !== 'https:') throw 0; } catch { er.textContent = 'Entrez un lien HTTPS valide.'; return; }
+    if (s) { if (!v('#as-t')) { er.textContent = 'Entrez le nom du site.'; return; } admSave({ sites: [...CFG.sites, { title: v('#as-t'), url: u, desc: v('#as-d') }], bgs: CFG.bgs }); }
+    else { if (!v('#ab-n')) { er.textContent = 'Entrez le nom du fond.'; return; } admSave({ sites: CFG.sites, bgs: [...CFG.bgs, { name: v('#ab-n'), url: u }] }); }
+  }
+});
 
 /* ---------- Fil d'actualité ---------- */
 const VER = '<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="11" fill="#0057FF"/><path d="m7 12.5 3 3 7-7" stroke="#fff" stroke-width="2.4" fill="none"/></svg>';
@@ -243,12 +274,21 @@ sv2 = function (n, k, i) {
   else if (s.mediaType === 'audio') body = `<audio src="${esc(s.mediaUrl)}" controls autoplay></audio>`;
   if (L) body = '<div class="se-stage" id="se-view"></div>';
   const cap = s.content && !L ? `<div style="${s.mediaType === 'text' ? '' : 'position:absolute;left:0;right:0;bottom:8px;'}font:600 ${s.mediaType === 'text' ? 26 : 17}px Fraunces,serif;text-align:center;padding:0 10px;text-shadow:0 1px 6px rgba(0,0,0,.4)">${esc(s.content)}</div>` : '';
-  SV.firstChild.innerHTML = `<div style="display:flex;gap:4px">${[...Array(N)].map((_, j) => `<div class="pg" style="flex:1">${j < i ? '<i style="animation:none;width:100%"></i>' : j == i ? `<i${L ? ` style="animation-duration:${ms}ms"` : ''}></i>` : ''}</div>`).join('')}</div><div style="display:flex;gap:10px;align-items:center"><div class="xs">${av(n, k)}</div><b>${esc(n)}</b><small style="opacity:.7">${ago(s.createdAt)}</small>${mine ? `<small style="margin-left:auto;opacity:.8">${s.viewsCount} vue${s.viewsCount > 1 ? 's' : ''}</small>` : ''}</div><div${L ? ' class="se-fit"' : ''} style="flex:1;display:grid;place-items:center;position:relative;min-height:0;overflow:hidden">${body}${cap}<span data-z="-1" style="position:absolute;left:0;top:0;bottom:0;width:40%"></span><span data-z="1" style="position:absolute;right:0;top:0;bottom:0;width:60%"></span></div><div style="display:flex;gap:8px;justify-content:center"><button class="chip" data-x>Fermer</button>${mine ? `<button class="chip" data-sdel="${s.id}">Supprimer</button>` : ''}</div>`;
+  SV.firstChild.innerHTML = `<div style="display:flex;gap:4px">${[...Array(N)].map((_, j) => `<div class="pg" style="flex:1">${j < i ? '<i style="animation:none;width:100%"></i>' : j == i ? `<i${L ? ` style="animation-duration:${ms}ms"` : ''}></i>` : ''}</div>`).join('')}</div><div style="display:flex;gap:10px;align-items:center"><div class="xs">${av(n, k)}</div><b>${esc(n)}</b><small style="opacity:.7">${ago(s.createdAt)}</small>${mine ? `<button class="chip" data-sviews="${s.id}" style="margin-left:auto" aria-label="Voir qui a vu cette story">${s.viewsCount} vue${s.viewsCount > 1 ? 's' : ''} ›</button>` : ''}</div><div${L ? ' class="se-fit"' : ''} style="flex:1;display:grid;place-items:center;position:relative;min-height:0;overflow:hidden">${body}${cap}<span data-z="-1" style="position:absolute;left:0;top:0;bottom:0;width:40%"></span><span data-z="1" style="position:absolute;right:0;top:0;bottom:0;width:60%"></span></div><div style="display:flex;gap:8px;justify-content:center"><button class="chip" data-x>Fermer</button>${mine ? `<button class="chip" data-sdel="${s.id}">Supprimer</button>` : ''}</div>`;
   SV.dataset.n = n; SV.dataset.k = k; SV.dataset.i = i; SV.firstChild.style.background = 'linear-gradient(160deg,' + G[(k + i) % 6] + ')'; SV.classList.add('on');
   if (L) JXStory.build(SV.querySelector('#se-view'), L, s);
   if (!mine && !s.viewedByMe) { s.viewedByMe = true; api('POST', `/api/stories/${s.id}/view`).catch(() => {}); if (g.stories.every((z) => z.viewedByMe)) { g.allSeen = true; renderStories(); } }
   sv2.t = setTimeout(() => { if (SV.classList.contains('on')) sv2(n, k, i + 1); }, ms);
 };
+document.addEventListener('click', async (e) => {
+  const vb = e.target.closest('[data-sviews]'), vc = e.target.closest('[data-svclose]');
+  if (vc) { e.stopImmediatePropagation(); const q = SV.querySelector('.sv-vw'); if (q) q.remove(); sv2(SV.dataset.n, +SV.dataset.k, +SV.dataset.i); return; }
+  if (!vb) return; e.stopImmediatePropagation(); clearTimeout(sv2.t);
+  const old = SV.querySelector('.sv-vw'); if (old) old.remove();
+  const p = document.createElement('div'); p.className = 'sv-vw'; p.innerHTML = '<div class="sv-vh"><b>Vues</b><button class="chip" data-svclose>Fermer</button></div><div class="sv-vl"><small>Chargement…</small></div>'; SV.firstChild.appendChild(p);
+  try { const l = await api('GET', `/api/stories/${vb.dataset.sviews}/views`); l.forEach((v) => reg(v.user)); p.querySelector('.sv-vl').innerHTML = l.length ? l.map((v) => `<div class="sr"><div class="xs">${av(v.user.username, col(v.user.username))}</div><div><b>${esc(v.user.username)}</b><small>${ago(v.viewedAt)}</small></div></div>`).join('') : '<small>Personne pour le moment.</small>'; }
+  catch (x) { p.querySelector('.sv-vl').textContent = x.message; }
+}, true);
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-sdel]'); if (!b) return; e.stopImmediatePropagation();
   try { await api('DELETE', '/api/stories/' + b.dataset.sdel); SV.classList.remove('on'); await loadStories(); T('Story supprimée'); } catch (x) { T(x.message); }

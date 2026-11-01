@@ -115,6 +115,15 @@ css.textContent = `
 @media(max-height:620px){.se-pane{max-height:46dvh}}
 .se-open .bn,.se-open .ai,.se-open .aip{display:none!important}
 .sv .pg{margin:0;padding:0}
+.sv{position:relative}
+.ov:has(>.sv){padding:0;background:#000}
+.ov>.sv{width:100%;max-width:none;height:100dvh;border-radius:0;border:0;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(14px + env(safe-area-inset-bottom,0px))}
+.ov>.sv>div{width:100%;max-width:480px;align-self:center}
+body:has(.ov.on>.sv) .bn,body:has(.ov.on>.sv) .ai{display:none!important}
+.ov>.sv>div.sv-vw{position:absolute;left:0;right:0;bottom:0;max-width:none;width:auto;max-height:60%;z-index:5;background:rgba(14,16,40,.94);border-radius:22px 22px 0 0;padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.sv-vh{display:flex;justify-content:space-between;align-items:center}.sv-vl{overflow:auto;display:flex;flex-direction:column;gap:8px}
+.adm-in{width:100%;box-sizing:border-box;padding:11px 13px;border-radius:12px;border:1.5px solid var(--ln);background:var(--s);color:var(--t);font:inherit;font-size:16px;margin-bottom:8px}
+.adm-s{color:var(--sub);font-size:13px;margin:4px 0 10px}
 `;
 document.head.appendChild(css);
 

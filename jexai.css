@@ -17,3 +17,5 @@
 .jxa-f textarea:focus{outline:2px solid #3b82f6}
 .jxa-f button{border:0;border-radius:12px;background:#2563eb;color:#fff;font-weight:600;padding:0 14px;cursor:pointer}
 @media(max-width:700px){#jexai-fab{bottom:78px;right:12px;width:48px;height:48px}#jexai-panel{right:8px;left:8px;width:auto;max-width:none;bottom:136px;height:min(70vh,calc(100vh - 160px))}}
+
+.jxa-i{margin:8px 0;white-space:normal}.jxa-i img{width:100%;max-height:240px;object-fit:cover;border-radius:10px;display:block;background:#050b1c}.jxa-i figcaption{font-size:11px;opacity:.65;margin-top:3px}

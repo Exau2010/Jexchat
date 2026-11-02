@@ -134,6 +134,7 @@ protoApi.early(app, sec, db);
 
 // JexAi (module additif) : POST /api/jexai, GET /api/jexai/status
 require('./jexai.js').mount(app, sec);
+require('./reels.js').mount(app, sec); // page Reels (vidéos courtes) : GET /api/reels, POST /api/reels/event
 
 // Remarque : style.css et script.js (ancienne interface) restent servis
 // tels quels ci-dessus car admin.html et informations.html en dépendent

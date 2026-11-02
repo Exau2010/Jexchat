@@ -8,19 +8,31 @@ const db = require('./database.js');
 
 const CATS = {
   chant: ['chanteur a cappella', 'cover chant voix', 'chorale gospel'],
+  musique: ['instrument musique solo', 'beat production', 'guitare piano'],
   danse: ['danse afro', 'chorégraphie danse', 'danse traditionnelle'],
   code: ['apprendre javascript', 'astuces programmation', 'python débutant'],
+  informatique: ['astuce ordinateur windows', 'astuce smartphone', 'cybersécurité conseils'],
+  marketing: ['marketing digital conseils', 'publicité réseaux sociaux', 'stratégie marketing'],
+  business: ['entrepreneuriat conseils', 'idée business', 'gagner de l argent en ligne'],
+  beauté: ['soin de la peau', 'coiffure tresses', 'maquillage tutoriel'],
+  mode: ['conseils style vestimentaire', 'couture mode africaine', 'tenue look'],
+  conduite: ['conduite auto conseils', 'code de la route', 'mécanique voiture astuce'],
+  religion: ['sagesse spirituelle', 'méditation prière', 'témoignage de foi'],
   lecture: ['conseils lecture livre', 'résumé de livre', 'citation roman'],
   humour: ['sketch humour', 'comédie drôle', 'stand up humoriste'],
   science: ['expérience science', 'astuce physique', 'fait scientifique'],
   culture: ['histoire en 1 minute', 'culture générale', 'fait historique'],
+  éducation: ['astuce révision examen', 'mathématiques astuce', 'apprendre anglais'],
   sport: ['football skills', 'basket highlights', 'entraînement sport'],
+  fitness: ['exercice musculation maison', 'routine fitness', 'santé bien-être conseils'],
   cuisine: ['recette rapide', 'cuisine africaine', 'astuce cuisine'],
+  voyage: ['découverte pays voyage', 'tourisme afrique', 'paysage nature'],
+  animaux: ['animaux mignons', 'chien chat drôle', 'faune sauvage'],
+  bricolage: ['bricolage astuce maison', 'DIY créatif', 'réparation facile'],
   motivation: ['motivation étudiant', 'conseils réussite', 'discipline productivité'],
-  musique: ['instrument musique solo', 'beat production', 'guitare piano'],
 };
 const CAT_KEYS = Object.keys(CATS);
-const DAILY_UNITS = 9000, SEARCH_COST = 100;
+const DAILY_UNITS = 9000, SEARCH_COST = 100, BOOT_MIN = 15; // BOOT_MIN : vidéos visées par catégorie au démarrage
 
 const Video = mongoose.models.ReelVideo || mongoose.model('ReelVideo', new mongoose.Schema({
   ytId: { type: String, unique: true }, title: String, channel: String, cat: { type: String, index: true }, at: { type: Date, default: Date.now }, bad: { type: Boolean, default: false },
@@ -43,7 +55,7 @@ async function collect() { // une recherche par passage, en tournant sur les cat
   const cat = CAT_KEYS.slice().sort((a, b) => (n[a] || 0) - (n[b] || 0))[0]; // la catégorie la moins fournie
   const kws = CATS[cat], q = kws[Math.floor(Math.random() * kws.length)] + ' #shorts';
   const order = ['relevance', 'date', 'viewCount'][Math.floor(Math.random() * 3)];
-  const u = 'https://www.googleapis.com/youtube/v3/search?' + new URLSearchParams({ part: 'snippet', type: 'video', videoDuration: 'short', videoEmbeddable: 'true', safeSearch: 'strict', maxResults: '50', q, order, key });
+  const u = 'https://www.googleapis.com/youtube/v3/search?' + new URLSearchParams({ part: 'snippet', type: 'video', videoDuration: 'short', videoEmbeddable: 'true', safeSearch: 'strict', maxResults: '50', q, order, relevanceLanguage: 'fr', key });
   const r = await fetch(u, { signal: AbortSignal.timeout(10000) });
   await Meta.updateOne({ day }, { $inc: { units: SEARCH_COST } });
   if (!r.ok) { console.error('[Reels] search', r.status); return; }
@@ -61,8 +73,16 @@ const pick = (arr, k) => { const a = arr.slice(); for (let i = a.length - 1; i >
 
 function mount(app, sec) {
   const lim = sec.createRateLimiter(120, 60 * 1000, (r) => (r.user?._id || r.ip) + ':reels');
-  setTimeout(() => collect().catch((e) => console.error('[Reels]', e.message)), 20000);
-  setInterval(() => collect().catch((e) => console.error('[Reels]', e.message)), 16 * 60 * 1000); // ≈ 90 recherches/jour max, plafonné par le quota
+  const run = () => collect().catch((e) => console.error('[Reels]', e.message));
+  setTimeout(async () => { // remplissage initial : on tourne sur toutes les catégories peu fournies, 3 s entre chaque recherche
+    for (let i = 0; i < CAT_KEYS.length * 2; i++) {
+      const c = await Video.aggregate([{ $match: { bad: false } }, { $group: { _id: '$cat', n: { $sum: 1 } } }]).catch(() => []);
+      const n = Object.fromEntries(c.map((x) => [x._id, x.n]));
+      if (CAT_KEYS.every((k) => (n[k] || 0) >= BOOT_MIN)) break;
+      await run(); await new Promise((ok) => setTimeout(ok, 3000));
+    }
+  }, 15000);
+  setInterval(run, 10 * 60 * 1000); // ensuite ≈ 89 recherches/jour au plus, plafonné par le quota
 
   app.get('/api/reels', sec.requireAuth, lim, async (req, res) => {
     try {
@@ -78,6 +98,11 @@ function mount(app, sec) {
       for (const [c, k] of Object.entries(want)) {
         const list = await Video.aggregate([{ $match: { cat: c, bad: false, ytId: { $nin: [...seen].slice(-300) } } }, { $sample: { size: k } }]);
         list.forEach((v) => out.push({ k: 'yt', id: v.ytId, ytId: v.ytId, title: v.title, channel: v.channel, cat: c }));
+      }
+      if (out.length < n) {
+        const have = new Set(out.map((x) => x.id));
+        const extra = await Video.aggregate([{ $match: { bad: false, ytId: { $nin: [...seen].slice(-300).concat([...have]) } } }, { $sample: { size: n - out.length } }]);
+        extra.forEach((v) => out.push({ k: 'yt', id: v.ytId, ytId: v.ytId, title: v.title, channel: v.channel, cat: v.cat }));
       }
       // vidéos des publications du site : 1 sur 4 environ
       const posts = await db.getPosts(0, 60);

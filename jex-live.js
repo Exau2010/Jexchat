@@ -818,10 +818,16 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
     } else {
       const f = document.createElement('iframe'); f.allow = 'autoplay; encrypted-media'; f.setAttribute('loading', 'eager');
       f.src = `https://www.youtube-nocookie.com/embed/${r.ytId}?enablejsapi=1&playsinline=1&controls=0&rel=0&modestbranding=1&fs=0&disablekb=1&iv_load_policy=3&loop=1&playlist=${r.ytId}&mute=${muted ? 1 : 0}&autoplay=${play ? 1 : 0}&origin=${encodeURIComponent(location.origin)}`;
-      f.addEventListener('load', () => { f.dataset.ok = 1; if (act === i) send(f, 'playVideo'); else send(f, 'pauseVideo'); });
+      f.style.opacity = 0; f.style.transition = 'opacity .15s'; setTimeout(() => { f.style.opacity = 1; }, 2500);
+      f.addEventListener('load', () => { f.dataset.ok = 1; try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*'); } catch (_) {} if (act === i) send(f, 'playVideo'); else send(f, 'pauseVideo'); });
       el.insertBefore(f, tp);
     }
   }
+  addEventListener('message', (e) => { // le lecteur YouTube signale « lecture en cours » : on affiche alors la vidéo
+    if (!/^https:\/\/www\.youtube-nocookie\.com$/.test(e.origin)) return;
+    let d; try { d = JSON.parse(e.data); } catch (_) { return; }
+    if (d && (d.event === 'onStateChange' ? d.info === 1 : d.event === 'infoDelivery' && d.info && d.info.playerState === 1)) root.querySelectorAll('.rs iframe').forEach((f) => { if (f.contentWindow === e.source) f.style.opacity = 1; });
+  });
   function unmount(i) { const el = sl(i); if (!el) return; el.querySelectorAll('iframe,video').forEach((n) => { if (n.tagName === 'VIDEO') { n.pause(); n.removeAttribute('src'); n.load(); } n.remove(); }); el.classList.remove('pz'); }
   function report(i) { // envoie le temps de visionnage de la diapositive quittée
     const r = list[i]; if (!r || !t0) return; const w = Date.now() - t0; t0 = 0;
@@ -833,21 +839,25 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
     const prev = act; if (prev >= 0) report(prev); act = i; t0 = Date.now();
     // l'ancienne s'arrête aussitôt ; seules les diapositives i-1, i et i+1 gardent un lecteur
     if (prev >= 0) { const pe = sl(prev); pe && pe.querySelectorAll('iframe').forEach((f) => send(f, 'pauseVideo')); pe && pe.querySelectorAll('video').forEach((v) => v.pause()); }
-    root.querySelectorAll('.rs').forEach((e) => { const k = +e.dataset.i; if (Math.abs(k - i) > 1) unmount(k); });
+    root.querySelectorAll('.rs').forEach((e) => { const k = +e.dataset.i; if (k < i || k > i + 2) unmount(k); });
     const el = sl(i); el.classList.remove('pz');
     const f = el.querySelector('iframe'), v = el.querySelector('video');
     if (f) { if (f.dataset.ok) { send(f, muted ? 'mute' : 'unMute'); send(f, 'playVideo'); } } else if (v) { v.muted = muted; v.currentTime = 0; v.play().catch(() => {}); } else mount(i, true);
-    mount(i + 1, false); mount(i - 1, false);
+    mount(i + 1, false); mount(i + 2, false);
     if (i >= list.length - 3) more();
   }
   function slide(r, i) {
     const bg = r.k === 'yt' ? `background-image:url('https://img.youtube.com/vi/${r.ytId}/hqdefault.jpg')` : 'background:#111';
     return `<section class="rs" data-i="${i}"><div class="rp" style="${bg}"></div><div class="rt"></div><div class="rpa"><span><svg viewBox="0 0 24 24" width="32" height="32" fill="#fff"><path d="M8 5v14l11-7z"/></svg></span></div><span class="rc">${esc(r.cat)}${r.k === 'yt' && r.cat !== 'communauté' ? ' · YouTube' : ''}</span><div class="ra"><button data-rl aria-label="J’aime"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="${HEART}"/></svg></button><button data-rm aria-label="Son"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${muted ? MUT : VOL}"/></svg></button></div><div class="rb">${r.channel ? `<b>@${esc(r.channel)}</b>` : ''}${esc((r.title || '').slice(0, 140))}</div></section>`;
   }
+  let pre = null;
+  const piv = setInterval(() => { if (booted) { clearInterval(piv); setTimeout(() => { pre = api('GET', '/api/reels?n=8').catch(() => null); }, 3000); } }, 1000);
+  ['https://www.youtube-nocookie.com', 'https://i.ytimg.com', 'https://www.google.com'].forEach((h) => { const l = document.createElement('link'); l.rel = 'preconnect'; l.href = h; document.head.appendChild(l); });
   async function more() {
     if (loading) return; loading = true;
     try {
-      const l = (await api('GET', '/api/reels?n=8')).filter((x) => !list.some((z) => z.id === x.id));
+      const p0 = pre; pre = null; const first = p0 ? await p0 : null;
+      const l = (first || await api('GET', '/api/reels?n=8')).filter((x) => !list.some((z) => z.id === x.id));
       const from = list.length; list = list.concat(l);
       const box = root.querySelector('.rl'); if (!box) return;
       box.querySelector('.re') && box.querySelector('.re').remove();

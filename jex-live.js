@@ -101,14 +101,14 @@ $('#sites').innerHTML = SITES.map((s) => `<div class="sr"><div class="xs"><div c
 /* ---------- Configuration admin : sites suggérés + fonds de discussion + panneau ---------- */
 let CFG = { sites: [], bgs: [], staff: false, admin: false }; const BG0 = BG.length, GR = ['#f58529,#dd2a7b', '#1877f2,#0b4fb3', '#12b886,#0b7285', '#7950f2,#4c2fb8', '#0057FF,#8B3EF0'];
 function paintSites() {
-  const l = CFG.sites.length ? CFG.sites.map((x, i) => [x.title, x.url, x.desc, GR[i % GR.length]]) : SITES.map((x) => [x[0], 'https://' + x[1], x[2], x[3]]);
+  const l = SITES.map((x) => [x[0], 'https://' + x[1], x[2], x[3]]).concat(CFG.sites.map((x, i) => [x.title, x.url, x.desc, GR[i % GR.length]]));
   $('#sites').innerHTML = l.map((x) => `<div class="sr"><div class="xs"><div class="av" style="--c:linear-gradient(135deg,${x[3]});border-radius:12px">${esc(x[0][0])}</div></div><div><b>${esc(x[0])}</b><small>${esc(x[2])}</small></div><a class="go" href="${esc(x[1])}" target="_blank" rel="noopener noreferrer" aria-label="Visiter ${esc(x[0])}">Visiter</a></div>`).join('');
 }
 function applyCfgBgs() { BG.length = BG0; CFG.bgs.forEach((b) => BG.push([b.name, '', null, null, b.url])); }
 async function loadCfg() { try { CFG = await api('GET', '/api/site-config'); } catch { return; } paintSites(); applyCfgBgs(); }
 window.JXADM = { row: () => (CFG.staff ? `<button class="arow" data-adm>${PX('lock')}Administration</button>` : '') };
 function admHtml() {
-  const sites = CFG.sites.map((x, i) => `<div class="sr"><div><b>${esc(x.title)}</b><small>${esc(x.desc)}</small></div><button class="chip" data-adm-del="s${i}">Supprimer</button></div>`).join('') || '<p class="adm-s">Aucun site ajouté : la liste par défaut est affichée.</p>';
+  const sites = CFG.sites.map((x, i) => `<div class="sr"><div><b>${esc(x.title)}</b><small>${esc(x.desc)}</small></div><button class="chip" data-adm-del="s${i}">Supprimer</button></div>`).join('') || '<p class="adm-s">Aucun site ajouté : seuls les sites par défaut sont affichés.</p>';
   const bgs = CFG.bgs.map((b, i) => `<div class="sr"><div class="xs"><div class="av" style="background:url('${esc(b.url)}') center/cover;border-radius:10px"></div></div><div><b>${esc(b.name)}</b></div><button class="chip" data-adm-del="b${i}">Supprimer</button></div>`).join('') || '<p class="adm-s">Aucun fond ajouté.</p>';
   return `<h3>Administration</h3><a class="arow" href="/admin">Modération : signalements et utilisateurs</a>` + (CFG.admin ? `<h4>Sites suggérés (barre latérale)</h4>${sites}<input class="adm-in" id="as-t" maxlength="60" placeholder="Nom du site"><input class="adm-in" id="as-u" type="url" inputmode="url" placeholder="https://…"><input class="adm-in" id="as-d" maxlength="160" placeholder="Description courte"><button class="pub2" data-adm-add="s">Ajouter le site</button><h4>Fonds d’écran de discussion</h4>${bgs}<input class="adm-in" id="ab-n" maxlength="30" placeholder="Nom du fond"><input class="adm-in" id="ab-u" type="url" inputmode="url" placeholder="https://… lien de l’image"><button class="pub2" data-adm-add="b">Ajouter le fond</button><p class="er" id="adm-e" role="alert"></p>` : '<p class="adm-s">Seuls les administrateurs modifient les sites et les fonds.</p>');
 }
@@ -463,7 +463,13 @@ document.addEventListener('input', (e) => { // « écrit… »
   clearTimeout(typT); typT = setTimeout(() => { typT = 0; SOCK.emit('typing_stop', { conversationId: cur }); }, 2500);
 });
 
-setInterval(() => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); const c = cur && cv(); if (c) { const s = $('#st'); if (s && !c.ty) s.textContent = status(c); } }, 30000);
+const tickSeen = () => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); const c = cur && cv(); if (c) { const s = $('#st'); if (s && !c.ty) s.textContent = status(c); } };
+setInterval(tickSeen, 10000);
+setInterval(() => { // resynchronise « en ligne » / « vu il y a… » avec le serveur (événements socket manqués)
+  const c = booted && !document.hidden && cur && cv(); if (!c || c.type !== 'private' || String(c.id).startsWith('g')) return;
+  api('GET', '/api/conversations/' + c.id).then((x) => { mapConv(x); tickSeen(); }).catch(() => {});
+}, 20000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tickSeen(); });
 /* ---------- Temps réel ---------- */
 function connectSocket() {
   if (SOCK) SOCK.disconnect(); sockUp = false; if (typeof io === 'undefined') return;
@@ -525,7 +531,7 @@ sset = ((o) => (k, v) => { if (k === 'jx-notif-pref') { api('PUT', '/api/me/prof
 function tileOf(r) {
   const img = r.mediaType === 'image' && r.mediaUrl, tx = img ? undefined : (r.content || r.description || (r.mediaType === 'video' ? 'Vidéo' : r.mediaType === 'link' ? 'Lien' : 'Publication'));
   const liked = !!r.likedByMe;
-  return { id: r.id, u: img || undefined, tx, g: ['#0057FF,#8B3EF0', '#12B886,#0B7285', '#E8590C,#D6336C', '#0A9ED9,#0057FF', '#14131A,#3B2A8F', '#D6336C,#8B3EF0'][col(r.id)], l: (r.likesCount || 0) - (liked ? 1 : 0), k: liked ? 1 : 0, sh: r.sharesCount || 0, a: r.author && r.author.username ? r.author.username : (typeof r.author === 'string' ? r.author : undefined), cap: img && r.content ? r.content.slice(0, 60) : undefined, c: 0, tg: ((r.content || '').toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || []).map((s) => s.slice(1)) };
+  return { id: r.id, u: img || undefined, tx, g: ['#0057FF,#8B3EF0', '#12B886,#0B7285', '#E8590C,#D6336C', '#0A9ED9,#0057FF', '#14131A,#3B2A8F', '#D6336C,#8B3EF0'][col(r.id)], l: (r.likesCount || 0) - (liked ? 1 : 0), k: liked ? 1 : 0, sh: r.sharesCount || 0, raw: r.mediaType || r.sharedFrom ? r : undefined, a: r.author && r.author.username ? r.author.username : (typeof r.author === 'string' ? r.author : undefined), cap: img && r.content ? r.content.slice(0, 60) : undefined, c: 0, tg: ((r.content || '').toLowerCase().match(/#[\p{L}\p{N}_]+/gu) || []).map((s) => s.slice(1)) };
 }
 async function loadMine() { const l = await api('GET', '/api/posts/user/' + MEID + '?limit=30'); POSTS.length = 0; l.forEach((r) => POSTS.push(tileOf(r))); }
 pList = function () { return pTab === 'posts' ? POSTS : pTab === 'media' ? POSTS.filter((p) => !p.tx) : pTab === 'likes' ? LIKES : SAVED; };
@@ -711,4 +717,86 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
   try { connectSocket(); renderAcct(); pushSetup(false); } catch {}
   if (/^\/messages/.test(location.pathname)) go('msg'); else if (/^\/settings/.test(location.pathname)) go('acct'); else if (/^\/lapage\//.test(location.pathname)) go('prof');
 })();
+})();
+
+/* ---------- Bulle de discussion (type Facebook) : quitter une discussion la réduit en bulle, même panneau, mêmes fonctions ---------- */
+(function () {
+  const st = document.createElement('style');
+  st.textContent = '#jx-dock{position:fixed;right:12px;bottom:calc(70px + env(safe-area-inset-bottom,0px));z-index:55;display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}#jx-dock>*{pointer-events:auto}#jx-box{display:none;width:min(360px,calc(100vw - 24px));height:min(520px,calc(100dvh - 170px));border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.28);background:var(--s,#fff)}#jx-box.on{display:flex}#jx-box .cp{position:relative;inset:auto;width:100%;height:100%;display:flex;border-radius:0;border:0;box-shadow:none}#jx-bub{position:relative;width:56px;height:56px;border-radius:50%;border:0;padding:0;cursor:pointer;background:none;box-shadow:0 6px 20px rgba(0,0,0,.3)}#jx-bub .avw{width:56px;height:56px;pointer-events:none}#jx-bub .jxn{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;border-radius:10px;background:#e03131;color:#fff;font:700 11px/20px system-ui;text-align:center;padding:0 5px}#jx-bub .jxn:empty{display:none}#jx-x{position:absolute;left:-6px;top:-6px;width:22px;height:22px;border-radius:50%;border:0;background:#14131A;color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer}';
+  document.head.appendChild(st);
+  let dock = null, nb = 0; // dock = id de la discussion réduite
+  const home = () => document.getElementById('msg');
+  function build() {
+    let d = document.getElementById('jx-dock'); if (d) return d;
+    d = document.createElement('div'); d.id = 'jx-dock';
+    d.innerHTML = '<div id="jx-box"></div><button id="jx-bub" aria-label="Ouvrir la discussion"><span class="avw"></span><span class="jxn"></span><span id="jx-x" role="button" aria-label="Fermer la bulle">×</span></button>';
+    document.body.appendChild(d); return d;
+  }
+  function badge() { const n = document.querySelector('#jx-bub .jxn'); if (n) n.textContent = nb ? (nb > 9 ? '9+' : nb) : ''; }
+  function collapse() { const b = document.getElementById('jx-box'); if (b) b.classList.remove('on'); }
+  function undock() { // remet le panneau de discussion à sa place d'origine
+    const cp = document.getElementById('cp'), m = home(), d = document.getElementById('jx-dock');
+    if (cp && m && cp.parentNode !== m) m.appendChild(cp);
+    if (d) d.remove(); dock = null; nb = 0;
+  }
+  function open() {
+    const c = dock && cv(); if (!c || c.id !== dock) return undock();
+    const b = document.getElementById('jx-box'), cp = document.getElementById('cp'); if (!b || !cp) return;
+    if (cp.parentNode !== b) b.appendChild(cp);
+    b.classList.add('on'); nb = 0; badge();
+    if (!$('#tr')) renderChat(); else th2();
+    setTimeout(() => { const t = $('#tr'); if (t) t.scrollTop = 1e9; }, 30);
+    if (c.unread) { c.unread = 0; renderList(); api('POST', `/api/conversations/${c.id}/seen`).catch(() => {}); }
+  }
+  function mk(id) {
+    const c = D.find((z) => z.id === id); if (!c) return;
+    dock = id; nb = 0; const d = build();
+    d.querySelector('#jx-bub .avw').innerHTML = avc(c); badge();
+    collapse();
+    d.querySelector('#jx-bub').onclick = (e) => { if (e.target.id === 'jx-x') { undock(); return; } const b = document.getElementById('jx-box'); if (b.classList.contains('on')) collapse(); else open(); };
+  }
+  const _setCo = setCo;
+  setCo = function (on) {
+    const was = cur; _setCo(on);
+    if (on) return;
+    if (dock && !(cur && cv())) { undock(); return; }
+    if (!on && was && cur === was && cv() && $('#vm') && !$('#vm').hidden) { // retour depuis la discussion
+      if (dock === was && document.getElementById('jx-box')?.classList.contains('on')) { collapse(); return; }
+    }
+  };
+  // Bouton retour du panneau : dans la bulle → réduit ; dans Messages → crée la bulle (la liste reste affichée)
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#bk')) return;
+    const b = document.getElementById('jx-box');
+    if (b && b.contains(e.target)) { e.stopPropagation(); collapse(); return; }
+    if (cur && cv()) mk(cur);
+  }, true);
+  const _go = go;
+  go = function (v, id) {
+    const leaving = v !== 'msg' && cur && cv() && $('#msg').classList.contains('co');
+    const cid = cur;
+    if (v === 'msg' && dock) { undock(); _setCo(false); }
+    const r = _go(v, id);
+    if (leaving && cid) { mk(cid); _setCo(false); }
+    return r;
+  };
+  const _ao = appendOne;
+  appendOne = function (c, m) {
+    _ao(c, m);
+    if (dock && c.id === dock && m.f !== 'me') { const b = document.getElementById('jx-box'); if (!b || !b.classList.contains('on')) { nb++; badge(); } }
+  };
+})();
+
+/* Visionneuse de publication : affiche le vrai contenu (vidéo, lien, partage, texte complet) et plus seulement texte/image */
+(function () {
+  const _pv = pvShow;
+  pvShow = function (o) {
+    _pv(o);
+    const p = pvL[pvI], b = p && p.raw && document.querySelector('#pvw .pvb'); if (!b) return;
+    const r = p.raw, first = b.firstElementChild; if (!first) return;
+    const w = document.createElement('div');
+    w.style.cssText = 'width:min(560px,96vw);max-height:calc(100dvh - 90px);overflow:auto;background:var(--s,#fff);color:var(--t,#111);border-radius:16px;padding:12px';
+    w.innerHTML = (r.content ? `<div class="pt" style="padding:0 0 10px;cursor:default">${ptxt(r.content)}</div>` : '') + media({ raw: r }) + (r.description ? `<div class="pt" style="padding:10px 0 0;cursor:default;color:var(--sub)">${ptxt(r.description)}</div>` : '');
+    first.replaceWith(w);
+  };
 })();

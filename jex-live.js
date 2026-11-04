@@ -686,7 +686,7 @@ document.addEventListener('click', (e) => { if (MINI && e.target.closest('.mini>
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];
-const JIMG = /\[\[img:(https:\/\/upload\.wikimedia\.org\/[^\s|\]]+)\|([^\]]*)\]\]/g;
+const JIMG = /\[\[img:(https:\/\/(?:upload\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g;
 function jaddRich(txt) { // texte + images Wikimedia (DOM, sans innerHTML : aucun risque d'injection)
   const b = jadd('a', ''); let i = 0, m; JIMG.lastIndex = 0;
   const put = (t) => { t = t.replace(/^\n+|\n+$/g, ''); if (t) { const p = document.createElement('div'); p.style.whiteSpace = 'pre-wrap'; p.textContent = t; b.append(p); } };
@@ -695,7 +695,7 @@ function jaddRich(txt) { // texte + images Wikimedia (DOM, sans innerHTML : aucu
     const f = document.createElement('figure'); f.style.cssText = 'margin:8px 0;padding:0';
     const im = new Image(); im.src = m[1]; im.alt = m[2]; im.loading = 'lazy'; im.referrerPolicy = 'no-referrer'; im.style.cssText = 'display:block;max-width:100%;border-radius:12px';
     im.onerror = () => f.remove();
-    const c = document.createElement('figcaption'); c.style.cssText = 'font-size:11.5px;opacity:.65;margin-top:3px'; c.textContent = m[2] + ' · Wikimedia Commons';
+    const c = document.createElement('figcaption'); c.style.cssText = 'font-size:11.5px;opacity:.65;margin-top:3px'; c.textContent = m[2] + (/openverse/.test(m[1]) ? ' · Openverse' : ' · Wikimedia Commons');
     f.append(im, c); b.append(f);
   }
   put(txt.slice(i)); jm.scrollTop = jm.scrollHeight; return b;

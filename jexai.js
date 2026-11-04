@@ -51,6 +51,7 @@ N'affiche jamais de valeur de clé, mot de passe, jeton, cookie ou donnée priv�
 
 // Images libres de droits : Wikipédia (image principale de l'article) puis Wikimedia Commons. Gratuit, sans clé, aucun token IA consommé.
 const WM_OK = /^https:\/\/upload\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i;
+const OV_OK = /^https:\/\/api\.openverse\.(?:org|engineering)\/v1\/images\/[0-9a-f-]{36}\/thumb\/?$/i;
 const WM_HEAD = { 'User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com; jexchat-support@jexchat.onrender.com) node-fetch', 'Api-User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com)' };
 const cleanCap = (t) => String(t || '').replace(/^File:/, '').replace(/\.\w+$/, '').replace(/[|\]\[]/g, ' ').slice(0, 100);
 async function wikiJson(host, params) {
@@ -82,6 +83,11 @@ async function commonsImage(q, trace) {
     const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
     for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
   } catch (e) { T('commons : ' + e.message); }
+  try { // dernier recours : Openverse (images libres, sans clé)
+    const r = await fetch('https://api.openverse.org/v1/images/?' + new URLSearchParams({ q, page_size: '3', mature: 'false' }), { signal: AbortSignal.timeout(6000), headers: WM_HEAD });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    for (const it of ((await r.json()).results || [])) { const t = it.thumbnail; if (t && OV_OK.test(t)) return { url: t.replace(/\/$/, '/'), cap: cleanCap(it.title || q) }; }
+  } catch (e) { T('openverse : ' + e.message); }
   T('aucune image trouvée pour « ' + q + ' »');
   return null;
 }

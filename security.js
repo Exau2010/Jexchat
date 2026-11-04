@@ -60,18 +60,7 @@ function createRateLimiter(maxRequests, windowMs, keyFn) {
 
 const authLimiter = createRateLimiter(10, 15 * 60 * 1000, (r) => r.ip + ':auth');
 const messageLimiter = createRateLimiter(60, 60 * 1000, (r) => (r.session?.userId || r.ip) + ':msg');
-// Limiteur API : avant, 200 requêtes/min pour TOUTE une IP. Derrière une IP partagée (réseaux mobiles, Wi-Fi),
-// le quota sautait et les requêtes (envoi, « vu », rafraîchissements) recevaient un 429 jusqu'à 60 s.
-// Désormais : quota PAR session connectée, plus un plafond IP large contre les abus (cookies aléatoires).
-// Les visiteurs sans session gardent exactement l'ancien quota (200/min par IP).
-function apiLimiter(req, res, next) {
-  const tok = req.cookies?.jexchat_session || req.headers['x-session-token'];
-  const ok = tok
-    ? rateLimit(req.ip + ':apiip', 3000, 60 * 1000) && rateLimit('t:' + tok + ':api', 240, 60 * 1000)
-    : rateLimit(req.ip + ':api', 200, 60 * 1000);
-  if (!ok) return res.status(429).json({ error: 'Trop de requêtes. Veuillez patienter.' });
-  next();
-}
+const apiLimiter = createRateLimiter(200, 60 * 1000, (r) => r.ip + ':api');
 const searchLimiter = createRateLimiter(30, 60 * 1000, (r) => (r.session?.userId || r.ip) + ':search');
 
 // Socket rate limit
@@ -250,45 +239,23 @@ function securityHeaders(req, res, next) {
 // ─── Auth Middleware ───────────────────────────────────────────────────────────
 const db = require('./database.js');
 
-// « Dernière activité » de session : une écriture par minute et par session au lieu d'une à CHAQUE requête,
-// et sans attendre la fin de l'écriture (elle ne bloque plus la réponse).
-const touchedAt = new Map();
-function touchSessionThrottled(token) {
-  const now = Date.now();
-  if (now - (touchedAt.get(token) || 0) < 60000) return;
-  touchedAt.set(token, now);
-  db.touchSession(token).catch(() => {});
-}
-setInterval(() => {
-  const limit = Date.now() - 10 * 60 * 1000;
-  for (const [k, v] of touchedAt) if (v < limit) touchedAt.delete(k);
-}, 5 * 60 * 1000);
-
 async function requireAuth(req, res, next) {
   const token = req.cookies?.jexchat_session || req.headers['x-session-token'];
   if (!token) return res.status(401).json({ error: 'Non authentifié.' });
 
-  // Cache 8 s (session + utilisateur) : avant, CHAQUE appel API faisait 2 allers-retours base (lent si la base est distante).
-  let hit = authCache.get(token);
-  if (!hit || hit.exp < Date.now()) {
-    const session = await db.findSession(token);
-    if (!session) { authCache.delete(token); return res.status(401).json({ error: 'Session expirée ou invalide.' }); }
-    const user = await db.findUserById(session.userId);
-    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable.' });
-    hit = { user, exp: Date.now() + 8000 };
-    authCache.set(token, hit);
-    if (authCache.size > 2000) { const now = Date.now(); for (const [k, v] of authCache) if (v.exp < now) authCache.delete(k); }
-  }
-  const user = hit.user;
+  const session = await db.findSession(token);
+  if (!session) return res.status(401).json({ error: 'Session expirée ou invalide.' });
+
+  const user = await db.findUserById(session.userId);
+  if (!user) return res.status(401).json({ error: 'Utilisateur introuvable.' });
   if (user.isBanned) return res.status(403).json({ error: 'Compte banni.' });
   if (user.isSuspended) return res.status(403).json({ error: 'Compte suspendu.' });
 
   req.session = { userId: user._id.toString(), username: user.username, roles: user.roles, token };
   req.user = user;
-  touchSessionThrottled(token);
+  await db.touchSession(token);
   next();
 }
-const authCache = new Map(); // token -> { user, exp }
 
 // Comme requireAuth, mais laisse passer les visiteurs non connectés au lieu
 // de renvoyer 401 : req.user reste undefined pour eux. Utilisé uniquement
@@ -305,7 +272,7 @@ async function optionalAuth(req, res, next) {
     if (!user || user.isBanned || user.isSuspended) return next();
     req.session = { userId: user._id.toString(), username: user.username, roles: user.roles, token };
     req.user = user;
-    touchSessionThrottled(token);
+    await db.touchSession(token);
   } catch {}
   next();
 }

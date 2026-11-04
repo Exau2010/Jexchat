@@ -64,13 +64,23 @@ async function commonsImage(q) {
       const j = await wikiJson(host, { action: 'query', generator: 'search', gsrsearch: q, gsrlimit: '3', prop: 'pageimages', piprop: 'thumbnail', pithumbsize: '640', pilimit: '3' });
       const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
       for (const p of pages) { const t = p.thumbnail && p.thumbnail.source; if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
-    } catch (_) {}
+    } catch (e) { console.warn('[JexAi] image wikipédia', host, e.message); }
   }
+  try { // résumé de l'article (autre route Wikipédia, au cas où la première ne renvoie pas d'image)
+    const o = await (await fetch('https://fr.wikipedia.org/w/api.php?' + new URLSearchParams({ action: 'opensearch', format: 'json', limit: '1', search: q }), { signal: AbortSignal.timeout(5000), headers: WM_HEAD })).json();
+    const title = o && o[1] && o[1][0];
+    if (title) {
+      const j = await (await fetch('https://fr.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(title.replace(/ /g, '_')), { signal: AbortSignal.timeout(5000), headers: WM_HEAD })).json();
+      const t = j && ((j.thumbnail && j.thumbnail.source) || (j.originalimage && j.originalimage.source));
+      if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(title) };
+    }
+  } catch (e) { console.warn('[JexAi] image résumé', e.message); }
   try { // à défaut : recherche directe dans Wikimedia Commons
     const j = await wikiJson('commons.wikimedia.org', { action: 'query', generator: 'search', gsrsearch: q + ' filetype:bitmap', gsrnamespace: '6', gsrlimit: '4', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '640' });
     const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
     for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
-  } catch (_) {}
+  } catch (e) { console.warn('[JexAi] image commons', e.message); }
+  console.warn('[JexAi] aucune image trouvée pour « ' + q + ' »');
   return null;
 }
 const IMG_RE = /\[\[img:([^\]]{2,120})\]\]/g;

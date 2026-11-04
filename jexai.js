@@ -51,20 +51,22 @@ N'affiche jamais de valeur de clé, mot de passe, jeton, cookie ou donnée priv�
 
 // Images libres de droits : Wikipédia (image principale de l'article) puis Wikimedia Commons. Gratuit, sans clé, aucun token IA consommé.
 const WM_OK = /^https:\/\/upload\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i;
-const WM_HEAD = { 'User-Agent': 'JexChat/1.0 (jexai; contact via site)', 'Api-User-Agent': 'JexChat/1.0 (jexai)' };
+const WM_HEAD = { 'User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com; jexchat-support@jexchat.onrender.com) node-fetch', 'Api-User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com)' };
 const cleanCap = (t) => String(t || '').replace(/^File:/, '').replace(/\.\w+$/, '').replace(/[|\]\[]/g, ' ').slice(0, 100);
 async function wikiJson(host, params) {
   const r = await fetch('https://' + host + '/w/api.php?' + new URLSearchParams({ format: 'json', origin: '*', ...params }), { signal: AbortSignal.timeout(5000), headers: WM_HEAD });
-  return r.ok ? r.json() : null;
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
 }
-async function commonsImage(q) {
+async function commonsImage(q, trace) {
   q = String(q || '').trim(); if (!q) return null;
+  const T = (m) => { console.warn('[JexAi] ' + m); if (trace) trace.push(m); };
   for (const host of ['fr.wikipedia.org', 'en.wikipedia.org']) { // image principale de l'article le plus pertinent
     try {
       const j = await wikiJson(host, { action: 'query', generator: 'search', gsrsearch: q, gsrlimit: '3', prop: 'pageimages', piprop: 'thumbnail', pithumbsize: '640', pilimit: '3' });
       const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
       for (const p of pages) { const t = p.thumbnail && p.thumbnail.source; if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
-    } catch (e) { console.warn('[JexAi] image wikipédia', host, e.message); }
+    } catch (e) { T('wikipédia ' + host + ' : ' + e.message); }
   }
   try { // résumé de l'article (autre route Wikipédia, au cas où la première ne renvoie pas d'image)
     const o = await (await fetch('https://fr.wikipedia.org/w/api.php?' + new URLSearchParams({ action: 'opensearch', format: 'json', limit: '1', search: q }), { signal: AbortSignal.timeout(5000), headers: WM_HEAD })).json();
@@ -74,13 +76,13 @@ async function commonsImage(q) {
       const t = j && ((j.thumbnail && j.thumbnail.source) || (j.originalimage && j.originalimage.source));
       if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(title) };
     }
-  } catch (e) { console.warn('[JexAi] image résumé', e.message); }
+  } catch (e) { T('résumé : ' + e.message); }
   try { // à défaut : recherche directe dans Wikimedia Commons
     const j = await wikiJson('commons.wikimedia.org', { action: 'query', generator: 'search', gsrsearch: q + ' filetype:bitmap', gsrnamespace: '6', gsrlimit: '4', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '640' });
     const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
     for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
-  } catch (e) { console.warn('[JexAi] image commons', e.message); }
-  console.warn('[JexAi] aucune image trouvée pour « ' + q + ' »');
+  } catch (e) { T('commons : ' + e.message); }
+  T('aucune image trouvée pour « ' + q + ' »');
   return null;
 }
 const IMG_RE = /\[\[img:([^\]]{2,120})\]\]/g;
@@ -89,12 +91,17 @@ const STOP = /(?<![\p{L}])(?:se|trouve|situe|situé|qui|quel|quelle|quels|quelle
 function topicOf(q) { return String(q || '').replace(/[?!.,;:()«»"“”]/g, ' ').replace(/['’]/g, ' ').replace(STOP, ' ').replace(/\s+/g, ' ').trim().slice(0, 80); }
 const FACT_Q = /^\s*(?:qui|quel|quelle|quels|quelles|où|quand|combien|pourquoi|comment|c['’]est quoi|qu['’]est|parle|présente|raconte|explique|donne|montre|affiche|who|what|where|when|why|how|tell|show)(?![\p{L}])|(?<![\p{L}])(?:image|photo|illustration)s?(?![\p{L}])/iu;
 const NOT_FACT = /jexchat|jexai|story|stories|message|profil|abonn|ami\b|amis\b|notification|mot de passe|compte|bug|erreur|```|function|const |<\/?\w+>/i;
-function wantsImage(q) { q = String(q || ''); return q.length >= 6 && q.length <= 200 && FACT_Q.test(q) && !NOT_FACT.test(q) && topicOf(q).length >= 3; }
+function wantsImage(q, reply) {
+  q = String(q || '');
+  if (q.length < 3 || q.length > 200 || NOT_FACT.test(q) || topicOf(q).length < 3) return false;
+  if (FACT_Q.test(q)) return true;
+  return q.length <= 80 && String(reply || '').length >= 200; // sujet nu (« Thomas Sankara ») avec une vraie réponse développée
+}
 async function enrich(reply, question) { // remplace les marqueurs par de vraies images ; `plain` = texte sans marqueurs (renvoyé au modèle au tour suivant)
   const qs = [...reply.matchAll(IMG_RE)].slice(0, 4).map((m) => m[1].trim());
   const tidy = (t) => t.replace(/\n{3,}/g, '\n\n').trim();
   if (!qs.length) {
-    if (!wantsImage(question)) return { plain: reply, rich: reply };
+    if (!wantsImage(question, reply)) return { plain: reply, rich: reply };
     const f = await commonsImage(topicOf(question));
     if (!f) return { plain: reply, rich: reply };
     const i = reply.indexOf('\n\n'); // l'image vient après le premier paragraphe
@@ -104,7 +111,7 @@ async function enrich(reply, question) { // remplace les marqueurs par de vraies
   const found = await Promise.all(qs.map(commonsImage));
   let k = 0;
   const rich = reply.replace(IMG_RE, () => { const f = found[k++]; return f ? `[[img:${f.url}|${f.cap}]]` : ''; });
-  if (!found.some(Boolean) && wantsImage(question)) { const f = await commonsImage(topicOf(question)); if (f) return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(reply.replace(IMG_RE, '') + `\n\n[[img:${f.url}|${f.cap}]]`) }; }
+  if (!found.some(Boolean) && wantsImage(question, reply)) { const f = await commonsImage(topicOf(question)); if (f) return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(reply.replace(IMG_RE, '') + `\n\n[[img:${f.url}|${f.cap}]]`) }; }
   return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(rich) };
 }
 
@@ -148,6 +155,12 @@ function mount(app, sec) {
 
   app.get('/api/jexai/status', sec.requireAuth, (req, res) => {
     res.json({ ready: !!(apiKey()), admin: (adminSessions.get(String(req.user._id)) || 0) > Date.now() });
+  });
+
+  app.get('/api/jexai/img-test', sec.requireAuth, limiter, async (req, res) => { // diagnostic : /api/jexai/img-test?q=Cotonou
+    const trace = [], q = String(req.query.q || 'Cotonou').slice(0, 80);
+    const image = await commonsImage(topicOf(q) || q, trace);
+    res.json({ question: q, sujet: topicOf(q) || q, image, erreurs: trace });
   });
 
   app.post('/api/jexai', sec.requireAuth, limiter, burst, async (req, res) => {

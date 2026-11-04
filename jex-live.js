@@ -7,14 +7,15 @@ const UID = {}, AVM = {}, FOLU = {};            // pseudo -> id / avatar
 let MEID = null, SOCK = null, STG = [], LIKES = [], SAVED = [], booted = false, typT = 0, notifT = 0;
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const col = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 6; };
-const ago = (t) => { const s = (Date.now() - +new Date(t)) / 1000; if (s < 60) return 'à l’instant'; if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h'; if (s < 172800) return 'hier'; return new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
-const seenTxt = (t) => { if (!t) return ''; const s = (Date.now() - t) / 1000; if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date().toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(Date.now() - 864e5).toDateString()) return 'vu hier à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+const ago = (t) => { const s = Math.max(0, (SNOW() - +new Date(t)) / 1000); if (s < 60) return 'à l’instant'; if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h'; if (s < 172800) return 'hier'; return new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
+const seenTxt = (t) => { if (!t) return ''; const s = Math.max(0, (SNOW() - t) / 1000); if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date(SNOW()).toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(SNOW() - 864e5).toDateString()) return 'vu hier à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
 const copy = (t, m) => { try { navigator.clipboard.writeText(t).then(() => T(m)); } catch { T(t); } };
 
 async function api(m, u, b) {
   const o = { method: m, credentials: 'same-origin', headers: {} };
   if (b !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(b); }
   let r; try { r = await fetch(u, o); } catch { throw new Error('Connexion au serveur impossible.'); }
+  try { const sd = +new Date(r.headers.get('date')); if (sd) SKEW = sd - Date.now(); } catch {} // l'horloge du téléphone peut être fausse : on se cale sur celle du serveur
   let d = null; try { d = await r.json(); } catch {}
   if (!r.ok) {
     if (r.status === 401 && booted && !/\/auth\//.test(u)) { kick(); }
@@ -472,6 +473,7 @@ setInterval(() => { // resynchronise « en ligne » / « vu il y a… » avec le
   const c = booted && !document.hidden && cur && cv(); if (!c || c.type !== 'private' || String(c.id).startsWith('g')) return;
   api('GET', '/api/conversations/' + c.id).then((x) => { mapConv(x); tickSeen(); }).catch(() => {});
 }, 20000);
+setInterval(() => { if (booted && !document.hidden) Promise.allSettled([loadOnline(), loadConvs()]).then(() => { try { renderList(); tickSeen(); } catch {} }); }, 30000); // filet de sécurité : statuts et « vu il y a » resynchronisés avec le serveur
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tickSeen(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}); } });
 window.addEventListener('online', () => { if (booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); } });
@@ -499,7 +501,7 @@ function connectSocket() {
   SOCK.on('messages_seen', (r) => { const c = cOf(r.conversationId); if (c && String(r.userId) !== String(MEID)) { c.ms.forEach((m) => { if (m.f === 'me') m.seen = 1; }); if (cur === c.id) th2(); } });
   SOCK.on('user_typing', (r) => { const c = cOf(r.conversationId); if (!c) return; c.ty = r.username; if (cur === c.id) typ(true); clearTimeout(c.tt); c.tt = setTimeout(() => { c.ty = null; if (cur === c.id) typ(false); }, 4000); });
   SOCK.on('user_stopped_typing', (r) => { const c = cOf(r.conversationId); if (c) { c.ty = null; if (cur === c.id) typ(false); } });
-  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 2000); };
+  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 6000); };
   SOCK.on('user_online', pres(true)); SOCK.on('user_offline', pres(false));
   const refresh = () => loadConvs().then(() => { renderList(); if (cur && !cv()) { cur = null; setCo(false); renderChat(); } }).catch(() => {});
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));

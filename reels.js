@@ -43,13 +43,13 @@ const Pref = mongoose.models.ReelPref || mongoose.model('ReelPref', new mongoose
 const Meta = mongoose.models.ReelMeta || mongoose.model('ReelMeta', new mongoose.Schema({ day: { type: String, unique: true }, units: { type: Number, default: 0 } }));
 
 // Seules les vidéos publiées de 2023 à aujourd'hui sont gardées (les anciennes déjà en base sont écartées au démarrage).
-const REEL_FROM = new Date('2023-01-01T00:00:00Z'), MIN_VIEWS = 20000; // vidéos récentes (2023 → aujourd'hui) et déjà appréciées
+const REEL_FROM = new Date('2023-01-01T00:00:00Z'), MIN_VIEWS = 5000; // vidéos récentes (2023 → aujourd'hui) et déjà appréciées
 Video.updateMany({ $or: [{ pub: { $exists: false } }, { pub: { $lt: REEL_FROM } }], bad: false }, { $set: { bad: true } }).catch(() => {});
 const dur = (iso) => { const m = /^PT(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || ''); return m ? (+m[1] || 0) * 60 + (+m[2] || 0) : 999; };
 const YT = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/|v\/))([\w-]{11})/;
 
 async function collect() { // une recherche par passage, en tournant sur les catégories
-  const key = (process.env.YOUTUBE_API_KEY || '').trim(); if (!key) return;
+  const key = (process.env.YOUTUBE_API_KEY || '').trim(); if (!key) { if (!collect.warned) { collect.warned = 1; console.warn('[Reels] YOUTUBE_API_KEY absente : aucune vidéo YouTube ne sera collectée (seules les vidéos des publications sont affichées).'); } return; }
   const day = new Date().toISOString().slice(0, 10);
   const meta = await Meta.findOneAndUpdate({ day }, { $setOnInsert: { units: 0 } }, { upsert: true, new: true });
   if (meta.units + SEARCH_COST + 1 > DAILY_UNITS) return; // quota du jour consommé : le calcul des préférences continue, pas la collecte
@@ -110,7 +110,10 @@ function mount(app, sec) {
       // vidéos des publications du site : 1 sur 4 environ
       const posts = await db.getPosts(0, 60);
       const vids = posts.filter((p) => p.mediaType === 'video' && p.mediaUrl && !seen.has('p' + p._id) && (YT.test(p.mediaUrl) || /\.(mp4|webm|ogg)(\?|$)/i.test(p.mediaUrl))).slice(0, 30);
-      const chosen = pick(vids, Math.max(1, Math.round(n / 4)));
+      let pool = vids;
+      if (!out.length && !pool.length) pool = posts.filter((p) => p.mediaType === 'video' && p.mediaUrl && (YT.test(p.mediaUrl) || /\.(mp4|webm|ogg)(\?|$)/i.test(p.mediaUrl))).slice(0, 30); // tout déjà vu : on repasse les anciennes
+      if (!out.length) { const any = await Video.aggregate([{ $match: { bad: false } }, { $sample: { size: n } }]).catch(() => []); any.forEach((v) => out.push({ k: 'yt', id: v.ytId, ytId: v.ytId, title: v.title, channel: v.channel, cat: v.cat })); } // base épuisée pour cet utilisateur : on recycle
+      const chosen = pick(pool, out.length ? Math.max(1, Math.round(n / 4)) : n); // sans vidéo YouTube, les vidéos des publications remplissent le fil
       const authors = chosen.length ? await db.findUsersByIds([...new Set(chosen.map((p) => p.authorId.toString()))]) : [];
       const am = new Map(authors.map((a) => [a._id.toString(), a.username]));
       chosen.forEach((p) => { const y = YT.exec(p.mediaUrl); out.push(y ? { k: 'yt', id: 'p' + p._id, ytId: y[1], title: p.content || '', channel: am.get(p.authorId.toString()) || '', cat: 'communauté', post: String(p._id) } : { k: 'mp4', id: 'p' + p._id, url: p.mediaUrl, title: p.content || '', channel: am.get(p.authorId.toString()) || '', cat: 'communauté', post: String(p._id) }); });

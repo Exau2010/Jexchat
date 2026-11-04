@@ -49,28 +49,53 @@ const ADMIN = `\nMODE DIAGNOSTIC ADMIN (identité vérifiée côté serveur). Tu
 Format d'un constat : problème, preuve, risque, gravité, correction recommandée, test de validation. Distingue clairement « confirmé » et « hypothèse à vérifier ». Tu n'as aucun accès au code ni à la base : n'affirme rien que la documentation ne montre pas.
 N'affiche jamais de valeur de clé, mot de passe, jeton, cookie ou donnée privée ; tu peux signaler qu'un secret existe, où, et recommander sa rotation. Tu ne modifies rien : tu proposes des corrections.\n`;
 
-// Images libres de droits : API Wikimedia Commons (gratuite, sans clé, aucun token IA consommé).
+// Images libres de droits : Wikipédia (image principale de l'article) puis Wikimedia Commons. Gratuit, sans clé, aucun token IA consommé.
+const WM_OK = /^https:\/\/upload\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i;
+const WM_HEAD = { 'User-Agent': 'JexChat/1.0 (jexai; contact via site)', 'Api-User-Agent': 'JexChat/1.0 (jexai)' };
+const cleanCap = (t) => String(t || '').replace(/^File:/, '').replace(/\.\w+$/, '').replace(/[|\]\[]/g, ' ').slice(0, 100);
+async function wikiJson(host, params) {
+  const r = await fetch('https://' + host + '/w/api.php?' + new URLSearchParams({ format: 'json', origin: '*', ...params }), { signal: AbortSignal.timeout(5000), headers: WM_HEAD });
+  return r.ok ? r.json() : null;
+}
 async function commonsImage(q) {
-  try {
-    const u = 'https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({ action: 'query', format: 'json', generator: 'search', gsrsearch: q + ' filetype:bitmap', gsrnamespace: '6', gsrlimit: '4', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '640' });
-    const r = await fetch(u, { signal: AbortSignal.timeout(4000), headers: { 'User-Agent': 'JexChat/1.0 (jexai)' } });
-    if (!r.ok) return null;
-    const pages = Object.values((await r.json()).query?.pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
-    for (const p of pages) {
-      const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url);
-      if (t && /^https:\/\/upload\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i.test(t)) return { url: t, cap: String(p.title || '').replace(/^File:/, '').replace(/\.\w+$/, '').replace(/[|\]\[]/g, ' ').slice(0, 100) };
-    }
+  q = String(q || '').trim(); if (!q) return null;
+  for (const host of ['fr.wikipedia.org', 'en.wikipedia.org']) { // image principale de l'article le plus pertinent
+    try {
+      const j = await wikiJson(host, { action: 'query', generator: 'search', gsrsearch: q, gsrlimit: '3', prop: 'pageimages', piprop: 'thumbnail', pithumbsize: '640', pilimit: '3' });
+      const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+      for (const p of pages) { const t = p.thumbnail && p.thumbnail.source; if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
+    } catch (_) {}
+  }
+  try { // à défaut : recherche directe dans Wikimedia Commons
+    const j = await wikiJson('commons.wikimedia.org', { action: 'query', generator: 'search', gsrsearch: q + ' filetype:bitmap', gsrnamespace: '6', gsrlimit: '4', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '640' });
+    const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+    for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
   } catch (_) {}
   return null;
 }
 const IMG_RE = /\[\[img:([^\]]{2,120})\]\]/g;
-async function enrich(reply) { // remplace les marqueurs par de vraies images ; `plain` = texte sans marqueurs (renvoyé au modèle au tour suivant)
+// Sujet de recherche tiré de la question de l'utilisateur (le modèle n'ajoute pas toujours de marqueur [[img:]]).
+const STOP = /(?<![\p{L}])(?:se|trouve|situe|situé|qui|quel|quelle|quels|quelles|quoi|où|ou|quand|comment|pourquoi|combien|est|sont|était|etait|ce|c|que|qu|qui|le|la|les|l|un|une|des|du|de|d|et|en|à|au|aux|sur|dans|par|pour|moi|me|donne|donnes|montre|montres|affiche|parle|parles|présente|presente|raconte|racontes|dis|dit|explique|peux|tu|vous|stp|svp|s|il|plus|image|images|photo|photos|illustration|avec|sur|about|what|who|where|when|how|is|are|the|a|an|of|show|tell|me|picture|pictures)(?![\p{L}])/giu;
+function topicOf(q) { return String(q || '').replace(/[?!.,;:()«»"“”]/g, ' ').replace(/['’]/g, ' ').replace(STOP, ' ').replace(/\s+/g, ' ').trim().slice(0, 80); }
+const FACT_Q = /^\s*(?:qui|quel|quelle|quels|quelles|où|quand|combien|pourquoi|comment|c['’]est quoi|qu['’]est|parle|présente|raconte|explique|donne|montre|affiche|who|what|where|when|why|how|tell|show)(?![\p{L}])|(?<![\p{L}])(?:image|photo|illustration)s?(?![\p{L}])/iu;
+const NOT_FACT = /jexchat|jexai|story|stories|message|profil|abonn|ami\b|amis\b|notification|mot de passe|compte|bug|erreur|```|function|const |<\/?\w+>/i;
+function wantsImage(q) { q = String(q || ''); return q.length >= 6 && q.length <= 200 && FACT_Q.test(q) && !NOT_FACT.test(q) && topicOf(q).length >= 3; }
+async function enrich(reply, question) { // remplace les marqueurs par de vraies images ; `plain` = texte sans marqueurs (renvoyé au modèle au tour suivant)
   const qs = [...reply.matchAll(IMG_RE)].slice(0, 4).map((m) => m[1].trim());
-  if (!qs.length) return { plain: reply, rich: reply };
+  const tidy = (t) => t.replace(/\n{3,}/g, '\n\n').trim();
+  if (!qs.length) {
+    if (!wantsImage(question)) return { plain: reply, rich: reply };
+    const f = await commonsImage(topicOf(question));
+    if (!f) return { plain: reply, rich: reply };
+    const i = reply.indexOf('\n\n'); // l'image vient après le premier paragraphe
+    const marker = `\n\n[[img:${f.url}|${f.cap}]]\n\n`;
+    return { plain: reply, rich: tidy(i > 0 ? reply.slice(0, i) + marker + reply.slice(i + 2) : reply + marker) };
+  }
   const found = await Promise.all(qs.map(commonsImage));
   let k = 0;
   const rich = reply.replace(IMG_RE, () => { const f = found[k++]; return f ? `[[img:${f.url}|${f.cap}]]` : ''; });
-  return { plain: reply.replace(IMG_RE, '').replace(/\n{3,}/g, '\n\n').trim(), rich: rich.replace(/\n{3,}/g, '\n\n').trim() };
+  if (!found.some(Boolean) && wantsImage(question)) { const f = await commonsImage(topicOf(question)); if (f) return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(reply.replace(IMG_RE, '') + `\n\n[[img:${f.url}|${f.cap}]]`) }; }
+  return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(rich) };
 }
 
 function mapError(status) {
@@ -153,7 +178,7 @@ function mount(app, sec) {
     try {
       const reply = (await callModel(system, clean, ctl.signal)).trim();
       if (!reply) return res.status(502).json({ error: 'JexAi n’a pas pu répondre. Réessayez.' });
-      const e = await enrich(reply);
+      const e = await enrich(reply, last);
       return res.json({ reply: e.plain, rich: e.rich, admin: stillAdmin });
     } catch (err) {
       if (res.headersSent) return;

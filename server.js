@@ -2011,7 +2011,7 @@ io.on('connection', async (socket) => {
       if (sockets.size === 0) {
         onlineUsers.delete(userId);
         const lastSeen = new Date();
-        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, lastSeen }); // annonce immédiate, puis écriture en base
+        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, username: socket.username, lastSeen }); // annonce immédiate, puis écriture en base
         await db.updateUserLastSeen(userId, false).catch(() => {});
       }
     }

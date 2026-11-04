@@ -268,11 +268,18 @@ async function requireAuth(req, res, next) {
   const token = req.cookies?.jexchat_session || req.headers['x-session-token'];
   if (!token) return res.status(401).json({ error: 'Non authentifié.' });
 
-  const session = await db.findSession(token);
-  if (!session) return res.status(401).json({ error: 'Session expirée ou invalide.' });
-
-  const user = await db.findUserById(session.userId);
-  if (!user) return res.status(401).json({ error: 'Utilisateur introuvable.' });
+  // Cache 8 s (session + utilisateur) : avant, CHAQUE appel API faisait 2 allers-retours base (lent si la base est distante).
+  let hit = authCache.get(token);
+  if (!hit || hit.exp < Date.now()) {
+    const session = await db.findSession(token);
+    if (!session) { authCache.delete(token); return res.status(401).json({ error: 'Session expirée ou invalide.' }); }
+    const user = await db.findUserById(session.userId);
+    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable.' });
+    hit = { user, exp: Date.now() + 8000 };
+    authCache.set(token, hit);
+    if (authCache.size > 2000) { const now = Date.now(); for (const [k, v] of authCache) if (v.exp < now) authCache.delete(k); }
+  }
+  const user = hit.user;
   if (user.isBanned) return res.status(403).json({ error: 'Compte banni.' });
   if (user.isSuspended) return res.status(403).json({ error: 'Compte suspendu.' });
 
@@ -281,6 +288,7 @@ async function requireAuth(req, res, next) {
   touchSessionThrottled(token);
   next();
 }
+const authCache = new Map(); // token -> { user, exp }
 
 // Comme requireAuth, mais laisse passer les visiteurs non connectés au lieu
 // de renvoyer 401 : req.user reste undefined pour eux. Utilisé uniquement

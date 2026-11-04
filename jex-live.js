@@ -530,6 +530,7 @@ function connectSocket() {
   SOCK.on('user_typing', (r) => { const c = cOf(r.conversationId); if (!c) return; c.ty = r.username; if (cur === c.id) typ(true); clearTimeout(c.tt); c.tt = setTimeout(() => { c.ty = null; if (cur === c.id) typ(false); }, 4000); });
   SOCK.on('user_stopped_typing', (r) => { const c = cOf(r.conversationId); if (c) { c.ty = null; if (cur === c.id) typ(false); } });
   const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) syncHd(); clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 6000); };
+  SOCK.on('presence_snapshot', (l) => { (l || []).forEach((u) => { if (u !== ME) { ONL.add(u); PAT[u] = Date.now(); } }); try { renderList(); syncHd(); } catch {} });
   SOCK.on('user_online', pres(true)); SOCK.on('user_offline', pres(false));
   const refresh = () => loadConvs().then(() => { renderList(); if (cur && !cv()) { cur = null; setCo(false); renderChat(); } }).catch(() => {});
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));

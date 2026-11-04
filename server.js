@@ -1941,6 +1941,7 @@ app.get('/api/firebase-config', (req, res) => {
 
 // ─── Socket.IO ─────────────────────────────────────────────────────────────────
 const onlineUsers = new Map(); // userId -> Set of socketIds
+const onlineMeta = new Map(); // userId -> { username, show } (pour envoyer l'instantané de présence)
 
 // Vérifie si un membre a actuellement un socket dans la room de cette
 // conversation (c.-à-d. qu'il l'a ouverte), pour éviter de créer une
@@ -2020,6 +2021,9 @@ io.on('connection', (socket) => {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socket.id);
   db.updateUserOnlineStatus(userId, true).catch(() => {}); // écriture lancée sans bloquer la suite
+  onlineMeta.set(userId, { username: socket.username, show: socket.user?.settings?.privacy?.showOnlineStatus !== false });
+  // Instantané immédiat de ceux qui sont en ligne (ne dépend plus d'aucune lecture en base)
+  socket.emit('presence_snapshot', [...onlineUsers.keys()].filter((id) => id !== userId).map((id) => onlineMeta.get(id)).filter((m) => m && m.show).map((m) => m.username));
   if (!pendingOffline && socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
 
   // ── Heartbeat ──

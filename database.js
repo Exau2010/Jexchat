@@ -294,6 +294,10 @@ async function updateUserLastSeen(userId, isOnline = false) {
   return User.updateOne({ _id: userId }, { lastSeen: new Date(), isOnline });
 }
 
+async function resetAllOnline() {
+  return User.updateMany({ isOnline: true }, { isOnline: false });
+}
+
 async function updateUserOnlineStatus(userId, isOnline) {
   return User.updateOne({ _id: userId }, { isOnline, lastSeen: new Date() });
 }
@@ -983,7 +987,7 @@ module.exports = {
   connect,
   User, Session, Conversation, Message, Notification, Report, Post, PostLike,
   createUser, findUserByUsername, findUserById, findUsersByIds,
-  updateUserLastSeen, updateUserOnlineStatus, updateUserSettings,
+  updateUserLastSeen, updateUserOnlineStatus, resetAllOnline, updateUserSettings,
   updateUserPassword, updateUsername, blockUser, unblockUser,
   addFcmToken, removeFcmToken, removeFcmTokens, deleteUserAccount,
   searchUsers, getOnlineUsers, getAllUsersAdmin, updateUserRole,

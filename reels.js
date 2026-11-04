@@ -35,13 +35,16 @@ const CAT_KEYS = Object.keys(CATS);
 const DAILY_UNITS = 9000, SEARCH_COST = 100, BOOT_MIN = 15; // BOOT_MIN : vidéos visées par catégorie au démarrage
 
 const Video = mongoose.models.ReelVideo || mongoose.model('ReelVideo', new mongoose.Schema({
-  ytId: { type: String, unique: true }, title: String, channel: String, cat: { type: String, index: true }, at: { type: Date, default: Date.now }, bad: { type: Boolean, default: false },
+  ytId: { type: String, unique: true }, title: String, channel: String, cat: { type: String, index: true }, at: { type: Date, default: Date.now }, pub: Date, views: Number, bad: { type: Boolean, default: false },
 }));
 const Pref = mongoose.models.ReelPref || mongoose.model('ReelPref', new mongoose.Schema({
   userId: { type: String, unique: true }, cats: { type: mongoose.Schema.Types.Mixed, default: {} }, seen: { type: [String], default: [] },
 }, { minimize: false }));
 const Meta = mongoose.models.ReelMeta || mongoose.model('ReelMeta', new mongoose.Schema({ day: { type: String, unique: true }, units: { type: Number, default: 0 } }));
 
+// Seules les vidéos publiées de 2023 à aujourd'hui sont gardées (les anciennes déjà en base sont écartées au démarrage).
+const REEL_FROM = new Date('2023-01-01T00:00:00Z'), MIN_VIEWS = 20000; // vidéos récentes (2023 → aujourd'hui) et déjà appréciées
+Video.updateMany({ $or: [{ pub: { $exists: false } }, { pub: { $lt: REEL_FROM } }], bad: false }, { $set: { bad: true } }).catch(() => {});
 const dur = (iso) => { const m = /^PT(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || ''); return m ? (+m[1] || 0) * 60 + (+m[2] || 0) : 999; };
 const YT = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/|v\/))([\w-]{11})/;
 
@@ -54,18 +57,18 @@ async function collect() { // une recherche par passage, en tournant sur les cat
   const n = Object.fromEntries(counts.map((c) => [c._id, c.n]));
   const cat = CAT_KEYS.slice().sort((a, b) => (n[a] || 0) - (n[b] || 0))[0]; // la catégorie la moins fournie
   const kws = CATS[cat], q = kws[Math.floor(Math.random() * kws.length)] + ' #shorts';
-  const order = ['relevance', 'date', 'viewCount'][Math.floor(Math.random() * 3)];
-  const u = 'https://www.googleapis.com/youtube/v3/search?' + new URLSearchParams({ part: 'snippet', type: 'video', videoDuration: 'short', videoEmbeddable: 'true', safeSearch: 'strict', maxResults: '50', q, order, relevanceLanguage: 'fr', key });
+  const order = ['relevance', 'viewCount', 'viewCount'][Math.floor(Math.random() * 3)];
+  const u = 'https://www.googleapis.com/youtube/v3/search?' + new URLSearchParams({ part: 'snippet', type: 'video', videoDuration: 'short', videoEmbeddable: 'true', safeSearch: 'strict', maxResults: '50', q, order, relevanceLanguage: 'fr', publishedAfter: REEL_FROM.toISOString(), publishedBefore: new Date().toISOString(), key });
   const r = await fetch(u, { signal: AbortSignal.timeout(10000) });
   await Meta.updateOne({ day }, { $inc: { units: SEARCH_COST } });
   if (!r.ok) { console.error('[Reels] search', r.status); return; }
   const items = ((await r.json()).items || []).filter((i) => i.id && i.id.videoId);
   if (!items.length) return;
-  const d = await fetch('https://www.googleapis.com/youtube/v3/videos?' + new URLSearchParams({ part: 'contentDetails,status', id: items.map((i) => i.id.videoId).join(','), key }), { signal: AbortSignal.timeout(10000) });
+  const d = await fetch('https://www.googleapis.com/youtube/v3/videos?' + new URLSearchParams({ part: 'contentDetails,status,statistics', id: items.map((i) => i.id.videoId).join(','), key }), { signal: AbortSignal.timeout(10000) });
   await Meta.updateOne({ day }, { $inc: { units: 1 } });
   if (!d.ok) return;
-  const ok = new Map(((await d.json()).items || []).filter((v) => dur(v.contentDetails && v.contentDetails.duration) <= 60 && v.status && v.status.embeddable).map((v) => [v.id, 1]));
-  const ops = items.filter((i) => ok.has(i.id.videoId)).map((i) => ({ updateOne: { filter: { ytId: i.id.videoId }, update: { $setOnInsert: { ytId: i.id.videoId, title: String(i.snippet.title || '').slice(0, 120), channel: String(i.snippet.channelTitle || '').slice(0, 60), cat, at: new Date() } }, upsert: true } }));
+  const ok = new Map(((await d.json()).items || []).filter((v) => dur(v.contentDetails && v.contentDetails.duration) <= 60 && v.status && v.status.embeddable && +(v.statistics && v.statistics.viewCount) >= MIN_VIEWS).map((v) => [v.id, +v.statistics.viewCount]));
+  const ops = items.filter((i) => ok.has(i.id.videoId) && new Date(i.snippet.publishedAt) >= REEL_FROM).map((i) => ({ updateOne: { filter: { ytId: i.id.videoId }, update: { $setOnInsert: { ytId: i.id.videoId, views: ok.get(i.id.videoId), pub: new Date(i.snippet.publishedAt), title: String(i.snippet.title || '').slice(0, 120), channel: String(i.snippet.channelTitle || '').slice(0, 60), cat, at: new Date() } }, upsert: true } }));
   if (ops.length) await Video.bulkWrite(ops, { ordered: false }).catch(() => {});
 }
 
@@ -81,7 +84,7 @@ function mount(app, sec) {
       if (CAT_KEYS.every((k) => (n[k] || 0) >= BOOT_MIN)) break;
       await run(); await new Promise((ok) => setTimeout(ok, 3000));
     }
-  }, 15000);
+  }, 5000);
   setInterval(run, 10 * 60 * 1000); // ensuite ≈ 89 recherches/jour au plus, plafonné par le quota
 
   app.get('/api/reels', sec.requireAuth, lim, async (req, res) => {

@@ -102,18 +102,21 @@ async function sendPushNotification(userId, tokens, title, body, data = {}) {
 }
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
+// Compression gzip/brotli des réponses HTML/JS/CSS/JSON (index.html, scripts, API) : réduit fortement les octets sur mobile.
+// Socket.IO (WebSocket) n'est pas concerné. Si le module n'est pas installé, le serveur démarre quand même.
+try { const compression = require('compression'); app.use(compression({ threshold: 1024 })); } catch (_) { console.warn('[perf] module "compression" absent : npm install'); }
 app.use(sec.securityHeaders);
 app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js','/bg-p0.jpg','/bg-p1.jpg','/bg-p2.jpg','/bg-p3.jpg','/bg-p4.jpg','/bg-p5.jpg','/bgt-p0.jpg','/bgt-p1.jpg','/bgt-p2.jpg','/bgt-p3.jpg','/bgt-p4.jpg','/bgt-p5.jpg'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,
     // ce qui laissait les navigateurs sur l'ancienne interface pendant 1 h après chaque mise à jour.
     if (file.endsWith('.css') || file.endsWith('.js')) res.setHeader('Cache-Control', 'no-cache');
-    else res.setHeader('Cache-Control', `public, max-age=${file.endsWith('.png') ? 86400 : 0}`);
+    else res.setHeader('Cache-Control', `public, max-age=${/\.(png|jpg)$/.test(file) ? 604800 : 0}`);
     res.sendFile(path.join(__dirname, file));
   });
 });
@@ -1961,12 +1964,14 @@ io.on('connection', async (socket) => {
   // Track online
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socket.id);
-  await db.updateUserOnlineStatus(userId, true);
+  const dbOn = db.updateUserOnlineStatus(userId, true).catch(() => {}); // écriture lancée tout de suite, sans retarder l'annonce « en ligne »
   if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
+  await dbOn;
 
   // ── Heartbeat ──
   const heartbeatInterval = setInterval(async () => {
-    await db.updateUserLastSeen(userId, true);
+    if (!onlineUsers.get(userId)?.has(socket.id)) return; // évite qu'un battement tardif réécrive « en ligne » après la déconnexion
+    await db.updateUserLastSeen(userId, true).catch(() => {});
   }, 30000);
 
   // ── Typing ──
@@ -2006,8 +2011,8 @@ io.on('connection', async (socket) => {
       if (sockets.size === 0) {
         onlineUsers.delete(userId);
         const lastSeen = new Date();
-        await db.updateUserOnlineStatus(userId, false);
-        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, lastSeen });
+        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, lastSeen }); // annonce immédiate, puis écriture en base
+        await db.updateUserLastSeen(userId, false).catch(() => {});
       }
     }
   });
@@ -2180,6 +2185,7 @@ async function start() {
   // Connect to MongoDB (non-fatal if it fails)
   try {
     await db.connect();
+    await db.resetAllOnline().catch(() => {}); // après un redémarrage, plus personne n'est réellement connecté
   } catch (err) {
     console.warn('[Start] DB connection failed, running in degraded mode:', err.message);
   }

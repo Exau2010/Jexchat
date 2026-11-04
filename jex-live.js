@@ -2,6 +2,7 @@
 (() => {
 'use strict';
 const q$ = (s) => document.querySelector(s);
+const PAT = {}; // pseudo -> instant du dernier événement de présence reçu par socket (prime sur un instantané plus ancien)
 const UID = {}, AVM = {}, FOLU = {};            // pseudo -> id / avatar
 let MEID = null, SOCK = null, STG = [], LIKES = [], SAVED = [], booted = false, typT = 0, notifT = 0;
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -49,7 +50,7 @@ async function loadProfile() {
 async function enter(rem, isNew) {
   await loadProfile(); setSess({ u: ME }, rem);
   $('#auth').classList.add('out'); setTimeout(() => { $('#auth').hidden = true; $('#auth').classList.remove('out'); }, 300);
-  booted = true; await bootData(); connectSocket(); go('home'); renderProf(); renderAcct();
+  booted = true; try { connectSocket(); } catch {} await bootData(); go('home'); renderProf(); renderAcct();
   T(isNew ? 'Bienvenue sur JexChat, ' + PD.name.split(' ')[0] + ' 🎉' : 'Connexion réussie');
 }
 aSubmit = async function () {
@@ -91,9 +92,11 @@ async function bootData() {
 }
 async function loadFollows() { const f = await api('GET', '/api/follow/mine'); FOL.clear(); f.following.forEach((u) => { reg(u); FOL.add(u.username); }); f.followers.forEach(reg); }
 async function loadOnline() {
-  const l = await api('GET', '/api/users/online'); ONL.clear();
+  const l = await api('GET', '/api/users/online'); const snap = new Set(l.map((u) => u.username));
+  if (l.length < 30) [...ONL].forEach((u) => { if (!snap.has(u) && !(PAT[u] > Date.now() - 5000)) ONL.delete(u); }); // liste complète : on retire les hors ligne (sans écraser un événement tout récent)
   l.forEach((u) => { reg(u); if (u.username !== ME) ONL.add(u.username); });
   $('#online').innerHTML = [...ONL].slice(0, 6).map((u) => `<button class="sr" style="width:100%;text-align:left" data-dm="${esc(u)}"><div class="xs" style="position:relative">${av(u, col(u))}<i class="dot"></i></div><div><b>${esc(u)}</b><small>En ligne</small></div></button>`).join('') || '<div class="empty" style="padding:12px">Personne en ligne pour le moment.</div>';
+  try { renderList(); tickSeen(); } catch {}
 }
 const SITES = [['FastDL', 'fastdl.app', 'Télécharger des photos et vidéos Instagram', '#f58529,#dd2a7b'], ['FDown', 'fdown.net', 'Télécharger des vidéos Facebook', '#1877f2,#0b4fb3'], ['Gratos', 'gratos.app', 'Un site gratuit à découvrir', '#12b886,#0b7285'], ['Onread', 'onread.com', 'Un site gratuit à découvrir', '#7950f2,#4c2fb8'], ['Discover Profile', 'discoverprofile.com', 'Un site gratuit à découvrir', '#fa5252,#c2255c']];
 $('#sites').innerHTML = SITES.map((s) => `<div class="sr"><div class="xs"><div class="av" style="--c:linear-gradient(135deg,${s[3]});border-radius:12px">${s[0][0]}</div></div><div><b>${s[0]}</b><small>${s[2]}</small></div><a class="go" href="https://${s[1]}" target="_blank" rel="noopener noreferrer" aria-label="Visiter ${s[0]}">Visiter</a></div>`).join('');
@@ -310,7 +313,7 @@ function mapConv(x) {
   let c = D.find((z) => z.id === x.id); if (!c) { c = { id: x.id, ms: [], unread: 0, k: 0 }; D.push(c); }
   x.members.forEach(reg); const o = x.otherUser;
   Object.assign(c, { type: x.type, name: x.name, unread: x.unreadCount || 0, ids: x.members.map((m) => m.id), mem: x.members.map((m) => m.username), owner: String(x.owner) === String(MEID) ? 1 : 0, other: o ? o.id : null, k: col(x.name), bgSrv: x.background });
-  if (o) { o.isOnline ? ONL.add(o.username) : ONL.delete(o.username); c.ls = o.lastSeen ? +new Date(o.lastSeen) : 0; c.seen = seenTxt(c.ls); }
+  if (o) { if (o.isOnline) ONL.add(o.username); else if (!(PAT[o.username] > Date.now() - 5000)) ONL.delete(o.username); c.ls = o.lastSeen ? +new Date(o.lastSeen) : 0; c.seen = seenTxt(c.ls); }
   applyBg(c, x.background);
   if (!c.loaded && x.lastMessage && x.lastMessage.createdAt && Date.now() - +new Date(x.lastMessage.createdAt) < 5 * 864e5) { const l = x.lastMessage; c.ms = [{ id: 'lm' + x.id, f: String(l.senderId) === String(MEID) ? 'me' : (c.name), x: l.content || '', type: ptype(l.type), t: +new Date(l.createdAt), a: 0, stub: 1, r: {} }]; }
   return c;
@@ -470,6 +473,8 @@ setInterval(() => { // resynchronise « en ligne » / « vu il y a… » avec le
   api('GET', '/api/conversations/' + c.id).then((x) => { mapConv(x); tickSeen(); }).catch(() => {});
 }, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tickSeen(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}); } });
+window.addEventListener('online', () => { if (booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); } });
 /* ---------- Temps réel ---------- */
 function connectSocket() {
   if (SOCK) SOCK.disconnect(); sockUp = false; if (typeof io === 'undefined') return;
@@ -494,7 +499,7 @@ function connectSocket() {
   SOCK.on('messages_seen', (r) => { const c = cOf(r.conversationId); if (c && String(r.userId) !== String(MEID)) { c.ms.forEach((m) => { if (m.f === 'me') m.seen = 1; }); if (cur === c.id) th2(); } });
   SOCK.on('user_typing', (r) => { const c = cOf(r.conversationId); if (!c) return; c.ty = r.username; if (cur === c.id) typ(true); clearTimeout(c.tt); c.tt = setTimeout(() => { c.ty = null; if (cur === c.id) typ(false); }, 4000); });
   SOCK.on('user_stopped_typing', (r) => { const c = cOf(r.conversationId); if (c) { c.ty = null; if (cur === c.id) typ(false); } });
-  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 2000); };
+  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 2000); };
   SOCK.on('user_online', pres(true)); SOCK.on('user_offline', pres(false));
   const refresh = () => loadConvs().then(() => { renderList(); if (cur && !cv()) { cur = null; setCo(false); renderChat(); } }).catch(() => {});
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));
@@ -679,10 +684,24 @@ document.addEventListener('click', (e) => { if (MINI && e.target.closest('.mini>
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];
+const JIMG = /\[\[img:(https:\/\/upload\.wikimedia\.org\/[^\s|\]]+)\|([^\]]*)\]\]/g;
+function jaddRich(txt) { // texte + images Wikimedia (DOM, sans innerHTML : aucun risque d'injection)
+  const b = jadd('a', ''); let i = 0, m; JIMG.lastIndex = 0;
+  const put = (t) => { t = t.replace(/^\n+|\n+$/g, ''); if (t) { const p = document.createElement('div'); p.style.whiteSpace = 'pre-wrap'; p.textContent = t; b.append(p); } };
+  while ((m = JIMG.exec(txt))) {
+    put(txt.slice(i, m.index)); i = m.index + m[0].length;
+    const f = document.createElement('figure'); f.style.cssText = 'margin:8px 0;padding:0';
+    const im = new Image(); im.src = m[1]; im.alt = m[2]; im.loading = 'lazy'; im.referrerPolicy = 'no-referrer'; im.style.cssText = 'display:block;max-width:100%;border-radius:12px';
+    im.onerror = () => f.remove();
+    const c = document.createElement('figcaption'); c.style.cssText = 'font-size:11.5px;opacity:.65;margin-top:3px'; c.textContent = m[2] + ' · Wikimedia Commons';
+    f.append(im, c); b.append(f);
+  }
+  put(txt.slice(i)); jm.scrollTop = jm.scrollHeight; return b;
+}
 jask = async function (qy) {
   if (!qy.trim()) return; jadd('u', qy); jhist.push({ role: 'user', content: qy.slice(0, 4000) }); if (jhist.length > 20) jhist.splice(0, jhist.length - 20);
   const t = document.createElement('div'); t.className = 'jb a jt'; t.innerHTML = '<i></i><i></i><i></i>'; jm.append(t); jm.scrollTop = jm.scrollHeight;
-  try { const r = await api('POST', '/api/jexai', { messages: jhist }); t.remove(); jadd('a', r.reply || '…'); jhist.push({ role: 'assistant', content: r.reply || '' }); }
+  try { const r = await api('POST', '/api/jexai', { messages: jhist }); t.remove(); if (r.rich && r.rich !== r.reply) jaddRich(r.rich); else jadd('a', r.reply || '…'); jhist.push({ role: 'assistant', content: r.reply || '' }); }
   catch (e) { t.remove(); jhist.pop(); jadd('a', e.message); }
 };
 const _jr = jreset; jreset = function () { jhist.length = 0; _jr(); };
@@ -713,8 +732,9 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
   ME = me.username; MEID = me.id; ACCS[ME] = ACCS[ME] || { name: ME, handle: ME, email: '', created: (me.createdAt || '').slice(0, 10) }; setSess({ u: ME }, true);
   try { await loadProfile(); } catch (e) { PD.name = PD.name || ME; PD.handle = ME; AVM[ME] = me.avatarUrl || ''; PD.av = me.avatarUrl || null; }
   $('#auth').hidden = true; booted = true;
+  try { connectSocket(); } catch {}
   try { await bootData(); } catch {}
-  try { connectSocket(); renderAcct(); pushSetup(false); } catch {}
+  try { renderAcct(); pushSetup(false); } catch {}
   if (/^\/messages/.test(location.pathname)) go('msg'); else if (/^\/settings/.test(location.pathname)) go('acct'); else if (/^\/lapage\//.test(location.pathname)) go('prof');
 })();
 

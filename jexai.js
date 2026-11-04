@@ -50,7 +50,8 @@ Format d'un constat : problème, preuve, risque, gravité, correction recommand�
 N'affiche jamais de valeur de clé, mot de passe, jeton, cookie ou donnée privée ; tu peux signaler qu'un secret existe, où, et recommander sa rotation. Tu ne modifies rien : tu proposes des corrections.\n`;
 
 // Images libres de droits : Wikipédia (image principale de l'article) puis Wikimedia Commons. Gratuit, sans clé, aucun token IA consommé.
-const WM_OK = /^https:\/\/upload\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i;
+const WM_OK = /^https:\/\/(?:upload|thumb)\.wikimedia\.org\/[^\s|\]]+\.(jpe?g|png|webp)$/i;
+const wmClean = (u) => String(u || '').split('?')[0]; // Wikimedia ajoute « ?utm_source=… » : on le retire
 const OV_OK = /^https:\/\/api\.openverse\.(?:org|engineering)\/v1\/images\/[0-9a-f-]{36}\/thumb\/?$/i;
 const WM_HEAD = { 'User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com; jexchat-support@jexchat.onrender.com) node-fetch', 'Api-User-Agent': 'JexChat/1.0 (https://jexchat.onrender.com)' };
 const cleanCap = (t) => String(t || '').replace(/^File:/, '').replace(/\.\w+$/, '').replace(/[|\]\[]/g, ' ').slice(0, 100);
@@ -68,7 +69,7 @@ async function commonsImage(q, trace) {
       const j = await wikiJson(host, { action: 'query', generator: 'search', gsrsearch: q, gsrlimit: '3', prop: 'pageimages', piprop: 'thumbnail', pithumbsize: '640', pilimit: '3' });
       const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
       if (trace) trace.push('wikipédia ' + host + ' : ' + pages.length + ' pages' + (j && j.error ? ' ERREUR ' + JSON.stringify(j.error).slice(0, 200) : '') + ' ; vignettes=' + JSON.stringify(pages.map((p) => p.thumbnail && p.thumbnail.source)).slice(0, 300));
-      for (const p of pages) { const t = p.thumbnail && p.thumbnail.source; if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
+      for (const p of pages) { const t = wmClean(p.thumbnail && p.thumbnail.source); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
     } catch (e) { T('wikipédia ' + host + ' : ' + e.message); }
   }
   try { // résumé de l'article (autre route Wikipédia, au cas où la première ne renvoie pas d'image)
@@ -77,7 +78,7 @@ async function commonsImage(q, trace) {
     if (trace && !title) trace.push('résumé : opensearch sans résultat ' + JSON.stringify(o).slice(0, 150));
     if (title) {
       const j = await (await fetch('https://fr.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(title.replace(/ /g, '_')), { signal: AbortSignal.timeout(5000), headers: WM_HEAD })).json();
-      const t = j && ((j.thumbnail && j.thumbnail.source) || (j.originalimage && j.originalimage.source));
+      const t = wmClean(j && ((j.thumbnail && j.thumbnail.source) || (j.originalimage && j.originalimage.source)));
       if (trace) trace.push('résumé « ' + title + ' » : image=' + t);
       if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(title) };
     }
@@ -86,7 +87,7 @@ async function commonsImage(q, trace) {
     const j = await wikiJson('commons.wikimedia.org', { action: 'query', generator: 'search', gsrsearch: q + ' filetype:bitmap', gsrnamespace: '6', gsrlimit: '4', prop: 'imageinfo', iiprop: 'url', iiurlwidth: '640' });
     const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
     if (trace) trace.push('commons : ' + pages.length + ' pages' + (j && j.error ? ' ERREUR ' + JSON.stringify(j.error).slice(0, 200) : '') + ' ; ' + JSON.stringify(pages.map((p) => p.imageinfo && p.imageinfo[0] && (p.imageinfo[0].thumburl || p.imageinfo[0].url))).slice(0, 300));
-    for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = i && (i.thumburl || i.url); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
+    for (const p of pages) { const i = p.imageinfo && p.imageinfo[0], t = wmClean(i && (i.thumburl || i.url)); if (t && WM_OK.test(t)) return { url: t, cap: cleanCap(p.title) }; }
   } catch (e) { T('commons : ' + e.message); }
   try { // dernier recours : Openverse (images libres, sans clé)
     const r = await fetch('https://api.openverse.org/v1/images/?' + new URLSearchParams({ q, page_size: '3', mature: 'false' }), { signal: AbortSignal.timeout(6000), headers: WM_HEAD });

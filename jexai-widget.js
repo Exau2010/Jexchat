@@ -15,7 +15,7 @@
 
   function fmt(t) { // texte échappé ; blocs ``` rendus en <pre><code>
     return esc(t).replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_, c) => '<pre><code>' + c + '</code></pre>')
-      .replace(/\[\[img:(https:\/\/(?:upload\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g, (_, u, c) => '<figure class="jxa-i"><img src="' + u + '" alt="' + c + '" loading="lazy" referrerpolicy="no-referrer"><figcaption>' + c + ' · Wikimedia Commons</figcaption></figure>')
+      .replace(/\[\[img:(https:\/\/(?:(?:upload|thumb)\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g, (_, u, c) => '<figure class="jxa-i"><img src="' + u + '" alt="' + c + '" loading="lazy" referrerpolicy="no-referrer"><figcaption>' + c + ' · Wikimedia Commons</figcaption></figure>')
       .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>').replace(/^[ \t]*[*-] /gm, '• ');
   }
   function add(role, text, rich) {

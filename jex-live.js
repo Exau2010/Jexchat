@@ -686,7 +686,7 @@ document.addEventListener('click', (e) => { if (MINI && e.target.closest('.mini>
 
 /* ---------- JexAi, notifications push, installation ---------- */
 const jhist = [];
-const JIMG = /\[\[img:(https:\/\/(?:upload\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g;
+const JIMG = /\[\[img:(https:\/\/(?:(?:upload|thumb)\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g;
 function jaddRich(txt) { // texte + images Wikimedia (DOM, sans innerHTML : aucun risque d'injection)
   const b = jadd('a', ''); let i = 0, m; JIMG.lastIndex = 0;
   const put = (t) => { t = t.replace(/^\n+|\n+$/g, ''); if (t) { const p = document.createElement('div'); p.style.whiteSpace = 'pre-wrap'; p.textContent = t; b.append(p); } };

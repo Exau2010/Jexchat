@@ -13,7 +13,6 @@ async function connect() {
       connectTimeoutMS: 5000,
     });
     console.log('[DB] Connected to MongoDB');
-    await ensureIndexes();
   } catch (err) {
     console.error('[DB] Connection error:', err.message);
     console.warn('[DB] Running in degraded mode - database unavailable');
@@ -64,7 +63,6 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: false });
 
-userSchema.index({ username: 1 });
 userSchema.index({ lastSeen: -1 });
 userSchema.index({ isOnline: 1, lastSeen: -1 });
 
@@ -79,7 +77,6 @@ const sessionSchema = new mongoose.Schema({
   lastActive: { type: Date, default: Date.now },
 });
 
-sessionSchema.index({ token: 1 });
 sessionSchema.index({ userId: 1 });
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 

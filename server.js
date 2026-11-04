@@ -24,8 +24,8 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: false },
-  pingTimeout: 10000,
-  pingInterval: 8000,
+  pingTimeout: 30000,
+  pingInterval: 25000,
   perMessageDeflate: false,
 });
 
@@ -2232,6 +2232,12 @@ async function start() {
   }
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`[JEXCHAT] Server running on port ${PORT}`);
+    // Anti-sommeil Render gratuit : le serveur s'appelle lui-même via son URL publique toutes les 10 min.
+    // (RENDER_EXTERNAL_URL est fournie automatiquement par Render ; rien ne se passe en local.)
+    const selfUrl = process.env.RENDER_EXTERNAL_URL;
+    if (selfUrl) {
+      setInterval(() => { fetch(`${selfUrl}/api/health`).catch(() => {}); }, 10 * 60 * 1000).unref();
+    }
   });
 }
 

@@ -61,6 +61,7 @@ async function wikiJson(host, params) {
 }
 async function commonsImage(q, trace) {
   q = String(q || '').trim(); if (!q) return null;
+  if (!Array.isArray(trace)) trace = null;
   const T = (m) => { console.warn('[JexAi] ' + m); if (trace) trace.push(m); };
   for (const host of ['fr.wikipedia.org', 'en.wikipedia.org']) { // image principale de l'article le plus pertinent
     try {
@@ -120,7 +121,7 @@ async function enrich(reply, question) { // remplace les marqueurs par de vraies
     const marker = `\n\n[[img:${f.url}|${f.cap}]]\n\n`;
     return { plain: reply, rich: tidy(i > 0 ? reply.slice(0, i) + marker + reply.slice(i + 2) : reply + marker) };
   }
-  const found = await Promise.all(qs.map(commonsImage));
+  const found = await Promise.all(qs.map((x) => commonsImage(x)));
   let k = 0;
   const rich = reply.replace(IMG_RE, () => { const f = found[k++]; return f ? `[[img:${f.url}|${f.cap}]]` : ''; });
   if (!found.some(Boolean) && wantsImage(question, reply)) { const f = await commonsImage(topicOf(question)); if (f) return { plain: tidy(reply.replace(IMG_RE, '')), rich: tidy(reply.replace(IMG_RE, '') + `\n\n[[img:${f.url}|${f.cap}]]`) }; }
@@ -213,7 +214,7 @@ function mount(app, sec) {
     try {
       const reply = (await callModel(system, clean, ctl.signal)).trim();
       if (!reply) return res.status(502).json({ error: 'JexAi n’a pas pu répondre. Réessayez.' });
-      const e = await enrich(reply, last);
+      let e; try { e = await enrich(reply, last); } catch (z) { console.error('[JexAi] images', z.message); e = { plain: reply, rich: reply }; }
       return res.json({ reply: e.plain, rich: e.rich, admin: stillAdmin });
     } catch (err) {
       if (res.headersSent) return;

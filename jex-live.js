@@ -324,21 +324,37 @@ function applyBg(c, b) {
   const m = /^bg(\d+)$/.exec(b.value || ''); if (b.type === 'gradient' && m && BG[+m[1]]) c.bg = +m[1];
 }
 async function loadConvs() { const l = await api('GET', '/api/conversations?limit=50'); const keep = new Set(l.map((x) => x.id)); l.forEach(mapConv); for (let i = D.length - 1; i >= 0; i--) if (!keep.has(D[i].id)) D.splice(i, 1); const S = sget('jx-bgs', {}); D.forEach((c) => { const s = S[c.id]; if (s && s.bgu) { c.bg = s.bg; c.bgu = s.bgu; } }); }
+let resyncBusy = 0, resyncAgain = 0;
+function markSeen(id, n) { // « vu » : légèrement groupé, et relancé si la requête échoue (réseau, 429…)
+  if (!n) { clearTimeout(markSeen.t); markSeen.t = setTimeout(() => markSeen(id, 1), 120); return; }
+  api('POST', `/api/conversations/${id}/seen`).catch(() => { if (n <= 3) setTimeout(() => { if (booted && cur === id && !document.hidden) markSeen(id, n + 1); }, [0, 2000, 5000, 10000][n]); });
+}
 async function resync() { // rattrape ce qui a été manqué pendant une coupure du socket (veille du téléphone, réseau instable)
   if (!booted) return;
+  if (resyncBusy) { resyncAgain = 1; return; }
+  resyncBusy = 1;
   try {
     await loadConvs(); const c = cur && cv();
     if (c && c.loaded && !document.hidden) {
-      const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); let add = 0;
-      l.filter((m) => !m.expired && m.type !== 'expired').map(mapMsg).forEach((m) => { if (!c.ms.some((z) => String(z.id) === String(m.id))) { c.ms.push(m); add++; } });
-      if (add) { c.ms.sort((a, b) => a.t - b.t); th2(); }
-      c.unread = 0; api('POST', `/api/conversations/${c.id}/seen`).catch(() => {});
+      const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); let chg = c.dirty ? 1 : 0; c.dirty = 0;
+      l.filter((m) => !m.expired && m.type !== 'expired').map(mapMsg).forEach((m) => {
+        const o = c.ms.find((z) => String(z.id) === String(m.id));
+        if (!o) { c.ms.push(m); chg++; return; }
+        if (o.pending) return;
+        if (m.seen && !o.seen) { o.seen = 1; chg++; }
+        if (m.del && !o.del) { o.del = true; o.pin = false; chg++; }
+        if (m.ed && !o.ed) { o.ed = 1; o.x = m.x; chg++; }
+        if (!!m.pin !== !!o.pin && !m.del) { o.pin = !!m.pin; chg++; }
+        if (JSON.stringify(o.r || {}) !== JSON.stringify(m.r || {}) || (o.me || null) !== (m.me || null)) { o.r = m.r; o.me = m.me; chg++; }
+      });
+      if (chg) { c.ms.sort((a, b) => a.t - b.t); th2(); }
+      c.unread = 0; markSeen(c.id);
     }
     renderList();
-  } catch {}
+  } catch {} finally { resyncBusy = 0; if (resyncAgain) { resyncAgain = 0; resync(); } }
 }
 let sockUp = false;
-document.addEventListener('visibilitychange', () => { if (document.hidden || !booted) return; if (SOCK && !SOCK.connected) SOCK.connect(); resync(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden || !booted) return; const c0 = cur && cv(); if (c0 && c0.dirty) { c0.dirty = 0; th2(); } if (SOCK && !SOCK.connected) SOCK.connect(); resync(); });
 addEventListener('online', () => { if (booted && SOCK && !SOCK.connected) SOCK.connect(); });
 setInterval(() => { if (booted && SOCK && !SOCK.connected && !document.hidden) resync(); }, 15000);
 async function loadMsgs(c) { const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); c.ms = l.filter((m) => !m.expired && m.type !== 'expired').map(mapMsg).sort((a, b) => a.t - b.t); c.loaded = 1; }
@@ -349,7 +365,7 @@ openConv = function (id) {
   _open(id); if (SOCK) SOCK.emit('join_conversation', id);
   const done = () => { if (cur !== id) return; c.ud = un && c.ms.length >= un ? c.ms[c.ms.length - un].id : null; renderThread(true); renderList(); };
   (c.loaded ? Promise.resolve() : loadMsgs(c)).then(done).catch((e) => T(e.message));
-  api('POST', `/api/conversations/${id}/seen`).catch(() => {});
+  markSeen(id);
 };
 initMsg = function (id) { renderList(); renderChat(); if (id) openConv(id); };
 dm = async function (name) {
@@ -469,11 +485,13 @@ document.addEventListener('input', (e) => { // « écrit… »
 
 const tickSeen = () => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); const c = cur && cv(); if (c) { const s = $('#st'); if (s && !c.ty) s.textContent = status(c); } };
 setInterval(tickSeen, 10000);
+let poll20 = 0, poll30 = 0; // tant que le socket est connecté, les rafraîchissements de secours sont espacés (÷3)
 setInterval(() => { // resynchronise « en ligne » / « vu il y a… » avec le serveur (événements socket manqués)
+  if (SOCK && SOCK.connected && (poll20++ % 3)) return;
   const c = booted && !document.hidden && cur && cv(); if (!c || c.type !== 'private' || String(c.id).startsWith('g')) return;
   api('GET', '/api/conversations/' + c.id).then((x) => { mapConv(x); tickSeen(); }).catch(() => {});
 }, 20000);
-setInterval(() => { if (booted && !document.hidden) Promise.allSettled([loadOnline(), loadConvs()]).then(() => { try { renderList(); tickSeen(); } catch {} }); }, 30000); // filet de sécurité : statuts et « vu il y a » resynchronisés avec le serveur
+setInterval(() => { if (SOCK && SOCK.connected && (poll30++ % 3)) return; if (booted && !document.hidden) Promise.allSettled([loadOnline(), loadConvs()]).then(() => { try { renderList(); tickSeen(); } catch {} }); }, 30000); // filet de sécurité : statuts et « vu il y a » resynchronisés avec le serveur
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tickSeen(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}); } });
 window.addEventListener('online', () => { if (booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); } });
@@ -489,8 +507,8 @@ function connectSocket() {
     if (c.ms.some((z) => String(z.id) === String(m.id))) return;
     if (mine) { const p = c.ms.find((z) => z.pending && z.f === 'me' && z.type === m.type && (z.x === m.x || m.type !== 'text')); if (p) { adopt(c, p, m.id); return; } }
     c.ms = c.ms.filter((z) => !z.stub); c.ms.push(m); c.ud = null;
-    if (cur === c.id && !document.hidden) { appendOne(c, m); if (!mine) api('POST', `/api/conversations/${c.id}/seen`).catch(() => {}); }
-    else if (!mine) { c.unread++; if (PD.msgToast !== 0) T(c.name + ' : ' + pv(m).slice(0, 40)); }
+    if (cur === c.id && !document.hidden) { appendOne(c, m); if (!mine) markSeen(c.id); }
+    else { if (cur === c.id) c.dirty = 1; if (!mine) { c.unread++; if (PD.msgToast !== 0) T(c.name + ' : ' + pv(m).slice(0, 40)); } }
     if (!mine) { c.ty = null; if (cur === c.id) typ(false); }
     renderList();
   });
@@ -512,7 +530,7 @@ function connectSocket() {
   SOCK.on('post_liked', (r) => { document.querySelectorAll(`.post[data-id="${r.postId}"]`).forEach((a) => { const b = a.querySelector('.act[onclick^="lk("]'); if (!b) return; const on = b.classList.contains('on'); b.setAttribute('onclick', `lk(this,${r.likesCount - (on ? 1 : 0)})`); b.querySelector('span').textContent = fm(r.likesCount); }); });
   SOCK.on('post_deleted', (r) => { const a = document.querySelector(`.post[data-id="${r.postId}"]`); if (a) a.remove(); });
   SOCK.on('story_created', () => loadStories().catch(() => {})); SOCK.on('story_deleted', () => loadStories().catch(() => {}));
-  SOCK.on('connect', () => { if (cur) SOCK.emit('join_conversation', cur); if (sockUp) resync(); sockUp = true; });
+  SOCK.on('connect', () => { if (cur) SOCK.emit('join_conversation', cur); if (sockUp) { resync(); loadOnline().catch(() => {}); } sockUp = true; });
 }
 
 /* ---------- Notifications ---------- */

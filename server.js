@@ -967,29 +967,34 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
     }
     if (imageClaim) await chatMedia.attach(imageClaim._id, message._id);
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
-    await db.updateConversationLastMessage(req.params.id, {
-      content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
-      senderId: req.user._id,
-      type: msgType,
-      createdAt: message.createdAt,
-    });
-    // Un nouveau message fait réapparaître la conversation chez tout
-    // participant qui l'avait supprimée de sa propre liste.
-    await db.unhideConversationForAll(req.params.id);
-
-    const sender = await db.findUserById(req.user._id);
-    const [msgOutBase] = (safeSharedPostId || replyToId) ? await enrichMessages([message]) : [safeMessage(message)];
+    const sender = req.user; // déjà chargé par requireAuth : inutile de le relire en base
+    const senderIdStr = req.user._id.toString();
+    const otherIds = conv.members.map((m) => m.toString()).filter((m) => m !== senderIdStr);
+    // Écritures indépendantes lancées EN PARALLÈLE (avant : 4 allers-retours base à la suite avant l'émission).
+    // Un nouveau message fait aussi réapparaître la conversation chez tout participant qui l'avait supprimée.
+    const [[msgOutBase]] = await Promise.all([
+      (safeSharedPostId || replyToId) ? enrichMessages([message]) : Promise.resolve([safeMessage(message)]),
+      db.updateConversationLastMessage(req.params.id, {
+        content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
+        senderId: req.user._id,
+        type: msgType,
+        createdAt: message.createdAt,
+      }),
+      db.unhideConversationForAll(req.params.id),
+      ...otherIds.map((mid) => db.incrementUnread(req.params.id, mid)),
+    ]);
     const msgOut = {
       ...msgOutBase,
       sender: safeUser(sender),
     };
 
-    // Émission immédiate à tous les membres, avant les écritures/notifications (plus de retard en cascade)
+    // Émission immédiate à tous les membres, puis réponse à l'expéditeur SANS attendre notifications/push
     for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
-    for (const memberId of conv.members) {
-      const mid = memberId.toString();
-      if (mid !== req.user._id.toString()) {
-        await db.incrementUnread(req.params.id, mid);
+    res.status(201).json(msgOut);
+
+    // Notifications internes + push en arrière-plan (n'impactent plus le délai d'envoi)
+    try {
+      for (const mid of otherIds) {
         // Notification (sauf si le destinataire a déjà cette conversation
         // ouverte : il voit le message arriver en direct via 'new_message').
         const member = await db.findUserById(mid);
@@ -1015,9 +1020,10 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
           }
         }
       }
+    } catch (e) {
+      console.error('[Message:notif]', e.message);
     }
-
-    return res.status(201).json(msgOut);
+    return;
   } catch (err) {
     console.error('[Message]', err.message);
     return res.status(500).json({ error: 'Erreur.' });
@@ -1132,8 +1138,10 @@ app.post('/api/conversations/:id/seen', sec.requireAuth, async (req, res) => {
     if (!conv || !conv.members.map(String).includes(req.user._id.toString())) {
       return res.status(403).json({ error: 'Accès non autorisé.' });
     }
-    await db.markMessagesSeen(req.params.id, req.user._id, new Date());
-    await db.resetUnread(req.params.id, req.user._id);
+    await Promise.all([
+      db.markMessagesSeen(req.params.id, req.user._id, new Date()),
+      db.resetUnread(req.params.id, req.user._id),
+    ]);
     for (const m of conv.members) {
       io.to(`user:${m.toString()}`).emit('messages_seen', {
         conversationId: req.params.id,
@@ -1633,23 +1641,27 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
       seenBy: [req.user._id],
     });
     await db.incrementPostShares(rootId);
-    await db.updateConversationLastMessage(req.body.conversationId, {
-      content: descResult.value || 'a partagé une publication',
-      senderId: req.user._id,
-      type: 'shared_post',
-      createdAt: message.createdAt,
-    });
-    await db.unhideConversationForAll(req.body.conversationId);
-
-    const sender = await db.findUserById(req.user._id);
-    const [msgOutBase] = await enrichMessages([message]);
+    const sender = req.user; // déjà chargé par requireAuth
+    const senderIdStr = req.user._id.toString();
+    const otherIds = conv.members.map((m) => m.toString()).filter((m) => m !== senderIdStr);
+    const [[msgOutBase]] = await Promise.all([
+      enrichMessages([message]),
+      db.updateConversationLastMessage(req.body.conversationId, {
+        content: descResult.value || 'a partagé une publication',
+        senderId: req.user._id,
+        type: 'shared_post',
+        createdAt: message.createdAt,
+      }),
+      db.unhideConversationForAll(req.body.conversationId),
+      ...otherIds.map((mid) => db.incrementUnread(req.body.conversationId, mid)),
+    ]);
     const msgOut = { ...msgOutBase, sender: safeUser(sender) };
 
     for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
-    for (const memberId of conv.members) {
-      const mid = memberId.toString();
-      if (mid !== req.user._id.toString()) {
-        await db.incrementUnread(req.body.conversationId, mid);
+    res.status(201).json(msgOut);
+
+    try {
+      for (const mid of otherIds) {
         const member = await db.findUserById(mid);
         if (member && member.settings?.notifications !== false && !isMemberViewingConv(mid, req.body.conversationId)) {
           await db.createNotification({
@@ -1661,9 +1673,6 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
             content: `${req.user.username} a partagé une publication`.substring(0, 100),
           });
           io.to(`user:${mid}`).emit('notification', { count: 1 });
-          // Push notification (manquait ici : même chaîne que pour un message
-          // texte classique, pour que le partage d'une publication en
-          // conversation déclenche aussi une notification hors site).
           if (member.fcmTokens?.length) {
             await sendPushNotification(
               mid,
@@ -1675,9 +1684,10 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
           }
         }
       }
+    } catch (e) {
+      console.error('[Message:notif]', e.message);
     }
-
-    return res.status(201).json(msgOut);
+    return;
   } catch (err) {
     console.error('[Posts] share', err.message);
     return res.status(500).json({ error: 'Erreur.' });
@@ -1957,44 +1967,42 @@ io.use(async (socket, next) => {
   next();
 });
 
-io.on('connection', async (socket) => {
+// Délai de grâce avant d'annoncer « hors ligne » : un rafraîchissement de page ou une micro-coupure
+// réseau ne fait plus clignoter le statut, et supprime la course « en ligne » / « hors ligne » en base.
+const offlineTimers = new Map(); // userId -> timer
+const OFFLINE_GRACE_MS = 3000;
+
+io.on('connection', (socket) => {
   const userId = socket.userId;
-  socket.join(`user:${userId}`);
+  const memberCache = new Map(); // conversationId -> expiration : évite une requête base par événement « écrit… »
+  const isConvMember = async (conversationId) => {
+    const hit = memberCache.get(conversationId);
+    if (hit && hit > Date.now()) return true;
+    const conv = await db.getConversationById(conversationId);
+    if (!conv || !conv.members.map(String).includes(userId)) return false;
+    memberCache.set(conversationId, Date.now() + 60000);
+    return true;
+  };
 
-  // Track online
-  if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
-  onlineUsers.get(userId).add(socket.id);
-  const dbOn = db.updateUserOnlineStatus(userId, true).catch(() => {}); // écriture lancée tout de suite, sans retarder l'annonce « en ligne »
-  if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
-  await dbOn;
-
-  // ── Heartbeat ──
-  const heartbeatInterval = setInterval(async () => {
-    if (!onlineUsers.get(userId)?.has(socket.id)) return; // évite qu'un battement tardif réécrive « en ligne » après la déconnexion
-    await db.updateUserLastSeen(userId, true).catch(() => {});
-  }, 30000);
-
-  // ── Typing ──
+  // ── Handlers enregistrés TOUT DE SUITE (avant tout await) : sinon un join_conversation / typing
+  //    envoyé par le client dès la connexion était perdu pendant l'écriture en base. ──
   socket.on('typing_start', async (data) => {
     if (!sec.socketRateLimit(socket.id, 'typing', 30, 60000)) return;
     if (!data?.conversationId || !sec.isValidObjectId(data.conversationId)) return;
-    const conv = await db.getConversationById(data.conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(data.conversationId))) return;
     socket.to(`conv:${data.conversationId}`).emit('user_typing', { userId, username: socket.username, conversationId: data.conversationId });
   });
 
   socket.on('typing_stop', async (data) => {
     if (!data?.conversationId || !sec.isValidObjectId(data.conversationId)) return;
-    const conv = await db.getConversationById(data.conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(data.conversationId))) return;
     socket.to(`conv:${data.conversationId}`).emit('user_stopped_typing', { userId, conversationId: data.conversationId });
   });
 
   // ── Join conversation room ──
   socket.on('join_conversation', async (conversationId) => {
     if (!sec.isValidObjectId(conversationId)) return;
-    const conv = await db.getConversationById(conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(conversationId))) return;
     socket.join(`conv:${conversationId}`);
   });
 
@@ -2002,19 +2010,39 @@ io.on('connection', async (socket) => {
     if (conversationId) socket.leave(`conv:${conversationId}`);
   });
 
+  socket.join(`user:${userId}`);
+
+  // ── Présence : en ligne ──
+  const pendingOffline = offlineTimers.get(userId);
+  if (pendingOffline) { clearTimeout(pendingOffline); offlineTimers.delete(userId); } // revenu pendant le délai de grâce : personne n'a vu « hors ligne »
+  if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
+  onlineUsers.get(userId).add(socket.id);
+  db.updateUserOnlineStatus(userId, true).catch(() => {}); // écriture lancée sans bloquer la suite
+  if (!pendingOffline && socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
+
+  // ── Heartbeat ──
+  const heartbeatInterval = setInterval(async () => {
+    if (!onlineUsers.get(userId)?.has(socket.id)) return; // évite qu'un battement tardif réécrive « en ligne » après la déconnexion
+    await db.updateUserLastSeen(userId, true).catch(() => {});
+  }, 30000);
+
   // ── Disconnect ──
-  socket.on('disconnect', async () => {
+  socket.on('disconnect', () => {
     clearInterval(heartbeatInterval);
     const sockets = onlineUsers.get(userId);
-    if (sockets) {
-      sockets.delete(socket.id);
-      if (sockets.size === 0) {
-        onlineUsers.delete(userId);
-        const lastSeen = new Date();
-        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, username: socket.username, lastSeen }); // annonce immédiate, puis écriture en base
-        await db.updateUserLastSeen(userId, false).catch(() => {});
-      }
-    }
+    if (!sockets) return;
+    sockets.delete(socket.id);
+    if (sockets.size > 0) return;
+    onlineUsers.delete(userId);
+    const lastSeen = new Date();
+    const showOnline = socket.user?.settings?.privacy?.showOnlineStatus !== false;
+    const timer = setTimeout(async () => {
+      offlineTimers.delete(userId);
+      if (onlineUsers.has(userId)) return; // reconnecté entre-temps
+      if (showOnline) io.emit('user_offline', { userId, username: socket.username, lastSeen });
+      await db.updateUserLastSeen(userId, false).catch(() => {});
+    }, OFFLINE_GRACE_MS);
+    offlineTimers.set(userId, timer);
   });
 });
 

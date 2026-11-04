@@ -109,6 +109,8 @@ app.use(sec.securityHeaders);
 app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
+// Les réponses de l'API ne doivent JAMAIS être mises en cache (statuts « en ligne », « vu à… », conversations) : sinon le navigateur/proxy rejoue d'anciennes données.
+app.use('/api', (req, res, next) => { if (req.method === 'GET') res.setHeader('Cache-Control', 'no-store'); next(); });
 // Serve static files (CSS, JS frontend, logo)
 const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js','/bg-data.js','/bg-p0.jpg','/bg-p1.jpg','/bg-p2.jpg','/bg-p3.jpg','/bg-p4.jpg','/bg-p5.jpg','/bgt-p0.jpg','/bgt-p1.jpg','/bgt-p2.jpg','/bgt-p3.jpg','/bgt-p4.jpg','/bgt-p5.jpg'];
 staticFiles.forEach(file => {
@@ -398,7 +400,7 @@ app.delete('/api/sessions', sec.requireAuth, async (req, res) => {
 // ─── User Routes ───────────────────────────────────────────────────────────────
 app.get('/api/users/online', sec.requireAuth, async (req, res) => {
   try {
-    const users = await db.getOnlineUsers(30);
+    const users = await db.getOnlineUsers(30, [...onlineUsers.keys()]);
     return res.json(users.map(safeUser));
   } catch (err) {
     return res.status(500).json({ error: 'Erreur.' });
@@ -2040,13 +2042,19 @@ io.on('connection', (socket) => {
       offlineTimers.delete(userId);
       if (onlineUsers.has(userId)) return; // reconnecté entre-temps
       if (showOnline) io.emit('user_offline', { userId, username: socket.username, lastSeen });
-      await db.updateUserLastSeen(userId, false).catch(() => {});
+      await db.setUserOffline(userId, lastSeen).catch(() => {}); // date de déconnexion exacte (celle diffusée aux autres)
     }, OFFLINE_GRACE_MS);
     offlineTimers.set(userId, timer);
   });
 });
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+// En ligne = au moins un socket connecté (mémoire du serveur, fiable) ; à défaut, flag BDD avec battement récent (autre instance).
+function isUserOnline(user) {
+  if (!user || !user._id) return false;
+  if (onlineUsers.has(String(user._id))) return true;
+  return !!user.isOnline && !!user.lastSeen && (Date.now() - new Date(user.lastSeen).getTime()) < db.PRESENCE_FRESH_MS;
+}
 function safeUser(user) {
   if (!user) return null;
   const showOnline = user.settings?.privacy?.showOnlineStatus !== false;
@@ -2056,8 +2064,9 @@ function safeUser(user) {
     username: user.username,
     identity: user.identity,
     avatarUrl: user.avatarUrl || '',
-    isOnline: showOnline ? user.isOnline : false,
-    lastSeen: showLastSeen ? user.lastSeen : null,
+    isOnline: showOnline ? isUserOnline(user) : false,
+    // en ligne => pas de « dernière connexion » (sinon l'ancienne date de déconnexion s'affiche à tort)
+    lastSeen: showLastSeen && !(showOnline && isUserOnline(user)) ? user.lastSeen : null,
     roles: user.roles,
     settings: user.settings ? { theme: user.settings.theme, accentColor: user.settings.accentColor } : undefined,
   };

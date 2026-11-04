@@ -423,13 +423,25 @@ async function getMessageByClientId(senderId, clientId) {
   return Message.findOne({ senderId, clientId }).lean();
 }
 
-async function getOnlineUsers(limit = 30) {
+// Présence « fraîche » : un battement (heartbeat) arrive toutes les 30 s ; au-delà de 75 s sans signe de vie, on considère hors ligne.
+const PRESENCE_FRESH_MS = 75000;
+async function setUserOffline(userId, lastSeen) {
+  return User.updateOne({ _id: userId }, { isOnline: false, lastSeen: lastSeen || new Date() });
+}
+
+async function getOnlineUsers(limit = 30, liveIds = []) {
   // On se base sur le flag isOnline (maintenu en temps réel par Socket.IO à la
   // connexion/déconnexion), pas sur un simple délai depuis lastSeen : un délai
   // faisait apparaître un utilisateur comme "en ligne" jusqu'à 2 minutes après
   // sa déconnexion réelle, en désaccord avec les événements user_online/user_offline.
-  return User.find({ isOnline: true, isBanned: { $ne: true }, 'settings.privacy.showOnlineStatus': { $ne: false } })
-    .select('username identity isOnline lastSeen')
+  // Source de vérité = sockets réellement connectés (liveIds, mémoire du serveur) + filet de sécurité sur le flag BDD récent.
+  const fresh = new Date(Date.now() - PRESENCE_FRESH_MS);
+  return User.find({
+    isBanned: { $ne: true },
+    'settings.privacy.showOnlineStatus': { $ne: false },
+    $or: [{ _id: { $in: liveIds } }, { isOnline: true, lastSeen: { $gte: fresh } }],
+  })
+    .select('username identity isOnline lastSeen settings')
     .sort({ lastSeen: -1 })
     .limit(limit)
     .lean();
@@ -987,7 +999,7 @@ module.exports = {
   connect,
   User, Session, Conversation, Message, Notification, Report, Post, PostLike,
   createUser, findUserByUsername, findUserById, findUsersByIds,
-  updateUserLastSeen, updateUserOnlineStatus, resetAllOnline, updateUserSettings,
+  updateUserLastSeen, updateUserOnlineStatus, setUserOffline, PRESENCE_FRESH_MS, resetAllOnline, updateUserSettings,
   updateUserPassword, updateUsername, blockUser, unblockUser,
   addFcmToken, removeFcmToken, removeFcmTokens, deleteUserAccount,
   searchUsers, getOnlineUsers, getAllUsersAdmin, updateUserRole,

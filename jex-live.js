@@ -8,7 +8,7 @@ let MEID = null, SOCK = null, STG = [], LIKES = [], SAVED = [], booted = false, 
 const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const col = (n) => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 6; };
 const ago = (t) => { const s = Math.max(0, (SNOW() - +new Date(t)) / 1000); if (s < 60) return 'à l’instant'; if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h'; if (s < 172800) return 'hier'; return new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }); };
-const seenTxt = (t) => { if (!t) return ''; const s = Math.max(0, (SNOW() - t) / 1000); if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date(SNOW()).toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(SNOW() - 864e5).toDateString()) return 'vu hier à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+const seenTxt = (t) => { if (!t || isNaN(t)) return ''; const s = Math.max(0, (SNOW() - t) / 1000); if (s < 60) return 'vu à l’instant'; if (s < 3600) return 'vu il y a ' + Math.floor(s / 60) + ' min'; if (s < 86400 && new Date(t).toDateString() === new Date(SNOW()).toDateString()) return 'vu il y a ' + Math.floor(s / 3600) + ' h'; if (new Date(t).toDateString() === new Date(SNOW() - 864e5).toDateString()) return 'vu hier à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); return 'vu le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
 const copy = (t, m) => { try { navigator.clipboard.writeText(t).then(() => T(m)); } catch { T(t); } };
 
 async function api(m, u, b) {
@@ -483,7 +483,17 @@ document.addEventListener('input', (e) => { // « écrit… »
   clearTimeout(typT); typT = setTimeout(() => { typT = 0; SOCK.emit('typing_stop', { conversationId: cur }); }, 2500);
 });
 
-const tickSeen = () => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); const c = cur && cv(); if (c) { const s = $('#st'); if (s && !c.ty) s.textContent = status(c); } };
+// Met à jour, dans l'en-tête de la conversation ouverte : le texte (« en ligne » / « vu … »), la couleur et la pastille verte.
+const syncHd = () => {
+  const c = cur && cv(); if (!c) return;
+  const s = $('#st'); if (s && !c.ty) s.textContent = status(c);
+  if (c.type !== 'private') return;
+  const on = ONL.has(c.name); if (s) s.classList.toggle('jx-on', on && !c.ty);
+  const w = document.querySelector('#cp .hd .avw'); if (!w) return;
+  const d = w.querySelector('.dot');
+  if (on && !d) { const i = document.createElement('i'); i.className = 'dot'; w.append(i); } else if (!on && d) d.remove();
+};
+const tickSeen = () => { if (!booted) return; D.forEach((c) => { if (c.type === 'private' && c.ls) c.seen = seenTxt(c.ls); }); syncHd(); };
 setInterval(tickSeen, 10000);
 let poll20 = 0, poll30 = 0; // tant que le socket est connecté, les rafraîchissements de secours sont espacés (÷3)
 setInterval(() => { // resynchronise « en ligne » / « vu il y a… » avec le serveur (événements socket manqués)
@@ -519,7 +529,7 @@ function connectSocket() {
   SOCK.on('messages_seen', (r) => { const c = cOf(r.conversationId); if (c && String(r.userId) !== String(MEID)) { c.ms.forEach((m) => { if (m.f === 'me') m.seen = 1; }); if (cur === c.id) th2(); } });
   SOCK.on('user_typing', (r) => { const c = cOf(r.conversationId); if (!c) return; c.ty = r.username; if (cur === c.id) typ(true); clearTimeout(c.tt); c.tt = setTimeout(() => { c.ty = null; if (cur === c.id) typ(false); }, 4000); });
   SOCK.on('user_stopped_typing', (r) => { const c = cOf(r.conversationId); if (c) { c.ty = null; if (cur === c.id) typ(false); } });
-  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) { const s = $('#st'); if (s) s.textContent = status(cv()); } clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 6000); };
+  const pres = (on) => (r) => { const u = r.username || Object.keys(UID).find((k) => String(UID[k]) === String(r.userId)); if (!u || u === ME) return; PAT[u] = Date.now(); on ? ONL.add(u) : ONL.delete(u); const c = D.find((z) => z.type === 'private' && z.name === u); if (c && !on) { c.ls = r.lastSeen ? +new Date(r.lastSeen) : Date.now(); c.seen = seenTxt(c.ls); } renderList(); if (cur && cv() && cv().name === u) syncHd(); clearTimeout(pres.t); pres.t = setTimeout(() => loadOnline().catch(() => {}), 6000); };
   SOCK.on('user_online', pres(true)); SOCK.on('user_offline', pres(false));
   const refresh = () => loadConvs().then(() => { renderList(); if (cur && !cv()) { cur = null; setCo(false); renderChat(); } }).catch(() => {});
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));

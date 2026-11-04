@@ -14,10 +14,12 @@
   const log = panel.querySelector('#jexai-log'), inp = panel.querySelector('#jxa-in'), go = panel.querySelector('#jxa-go');
 
   function fmt(t) { // texte échappé ; blocs ``` rendus en <pre><code>
-    return esc(t).replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_, c) => '<pre><code>' + c + '</code></pre>');
+    return esc(t).replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_, c) => '<pre><code>' + c + '</code></pre>')
+      .replace(/\[\[img:(https:\/\/(?:(?:upload|thumb)\.wikimedia\.org|api\.openverse\.(?:org|engineering))\/[^\s|\]]+)\|([^\]]*)\]\]/g, (_, u, c) => '<figure class="jxa-i"><img src="' + u + '" alt="' + c + '" loading="lazy" referrerpolicy="no-referrer"><figcaption>' + c + ' · Wikimedia Commons</figcaption></figure>')
+      .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>').replace(/^[ \t]*[*-] /gm, '• ');
   }
-  function add(role, text) {
-    const d = document.createElement('div'); d.className = 'jxa-m ' + role; d.innerHTML = fmt(text);
+  function add(role, text, rich) {
+    const d = document.createElement('div'); d.className = 'jxa-m ' + role; d.innerHTML = fmt(rich || text);
     if (role === 'a') {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'jxa-cp'; b.textContent = 'Copier';
       b.onclick = () => navigator.clipboard?.writeText(text).then(() => { b.textContent = 'Copié ✓'; setTimeout(() => (b.textContent = 'Copier'), 1500); });
@@ -29,7 +31,7 @@
   function render() {
     log.innerHTML = '';
     if (!hist.length) add('a', 'Bonjour ! Je suis JexAi. Je peux vous aider à utiliser JexChat et à créer vos stories.');
-    hist.forEach((m) => add(m.role === 'user' ? 'u' : 'a', m.content));
+    hist.forEach((m) => add(m.role === 'user' ? 'u' : 'a', m.content, m.rich));
   }
   function setBusy(b) { busy = b; go.textContent = b ? 'Arrêter' : 'Envoyer'; }
   function open(v) {
@@ -51,12 +53,12 @@
     try {
       const h = { 'Content-Type': 'application/json' };
       if (typeof state !== 'undefined' && state.token) h['X-Session-Token'] = state.token;
-      const r = await fetch('/api/jexai', { method: 'POST', headers: h, credentials: 'include', signal: ctl.signal, body: JSON.stringify({ messages: hist.slice(-20) }) });
+      const r = await fetch('/api/jexai', { method: 'POST', headers: h, credentials: 'include', signal: ctl.signal, body: JSON.stringify({ messages: hist.slice(-20).map((m) => ({ role: m.role, content: m.content })) }) });
       const j = await r.json().catch(() => ({}));
       wait.remove();
       if (!r.ok) { hist.pop(); add('e', j.error || 'JexAi est indisponible.'); }
       else if (j.redact) { hist.pop(); add('a', j.reply); }
-      else { hist.push({ role: 'assistant', content: j.reply }); add('a', j.reply); }
+      else { hist.push({ role: 'assistant', content: j.reply, rich: j.rich && j.rich !== j.reply ? j.rich : undefined }); add('a', j.reply, j.rich); }
     } catch (err) {
       wait.remove(); hist.pop();
       add('e', err.name === 'AbortError' ? 'Génération arrêtée.' : 'Connexion impossible. Vérifiez votre réseau.');

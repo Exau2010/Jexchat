@@ -159,7 +159,7 @@ messageSchema.index({ pinned: 1, conversationId: 1 });
 // --- Notification ---
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  type: { type: String, enum: ['message', 'group_invite', 'mention', 'system', 'story', 'post', 'like'], default: 'message' },
+  type: { type: String, enum: ['message', 'group_invite', 'mention', 'system', 'story', 'post', 'like', 'follow', 'share', 'comment'], default: 'message' },
   fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation' },
   messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
@@ -294,6 +294,10 @@ async function updateUserLastSeen(userId, isOnline = false) {
   return User.updateOne({ _id: userId }, { lastSeen: new Date(), isOnline });
 }
 
+async function resetAllOnline() {
+  return User.updateMany({ isOnline: true }, { isOnline: false });
+}
+
 async function updateUserOnlineStatus(userId, isOnline) {
   return User.updateOne({ _id: userId }, { isOnline, lastSeen: new Date() });
 }
@@ -419,13 +423,25 @@ async function getMessageByClientId(senderId, clientId) {
   return Message.findOne({ senderId, clientId }).lean();
 }
 
-async function getOnlineUsers(limit = 30) {
+// Présence « fraîche » : un battement (heartbeat) arrive toutes les 30 s ; au-delà de 75 s sans signe de vie, on considère hors ligne.
+const PRESENCE_FRESH_MS = 75000;
+async function setUserOffline(userId, lastSeen) {
+  return User.updateOne({ _id: userId }, { isOnline: false, lastSeen: lastSeen || new Date() });
+}
+
+async function getOnlineUsers(limit = 30, liveIds = []) {
   // On se base sur le flag isOnline (maintenu en temps réel par Socket.IO à la
   // connexion/déconnexion), pas sur un simple délai depuis lastSeen : un délai
   // faisait apparaître un utilisateur comme "en ligne" jusqu'à 2 minutes après
   // sa déconnexion réelle, en désaccord avec les événements user_online/user_offline.
-  return User.find({ isOnline: true, isBanned: { $ne: true }, 'settings.privacy.showOnlineStatus': { $ne: false } })
-    .select('username identity isOnline lastSeen')
+  // Source de vérité = sockets réellement connectés (liveIds, mémoire du serveur) + filet de sécurité sur le flag BDD récent.
+  const fresh = new Date(Date.now() - PRESENCE_FRESH_MS);
+  return User.find({
+    isBanned: { $ne: true },
+    'settings.privacy.showOnlineStatus': { $ne: false },
+    $or: [{ _id: { $in: liveIds } }, { isOnline: true, lastSeen: { $gte: fresh } }],
+  })
+    .select('username identity isOnline lastSeen settings')
     .sort({ lastSeen: -1 })
     .limit(limit)
     .lean();
@@ -775,6 +791,41 @@ async function getPosts(skip = 0, limit = 20) {
     .lean();
 }
 
+// Fil « mélangé » : à chaque actualisation le client envoie une nouvelle graine (« <horodatage>-<aléa> »).
+// Le rang d'une publication ne dépend que de (graine, identifiant) : l'ordre reste donc STABLE d'une page
+// à l'autre (aucun doublon, aucun trou, même si de nouvelles publications arrivent entre-temps) et TOUTES les
+// publications, anciennes comprises, restent atteignables en bas du fil. Les 3 plus récentes (à l'instant de la
+// graine) restent en tête pour que les nouveautés ne soient jamais enfouies.
+let _feedIdsCache = { at: 0, rows: [] };
+function _feedHash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  h ^= h >>> 13; h = Math.imul(h, 1274126177); h ^= h >>> 16;
+  return h >>> 0;
+}
+async function getPostsShuffled(seed, skip = 0, limit = 20) {
+  const now = Date.now();
+  if (now - _feedIdsCache.at > 8000) {
+    const rows = await Post.find({ deleted: { $ne: true } }).select('_id createdAt').sort({ createdAt: -1, _id: -1 }).limit(20000).lean();
+    _feedIdsCache = { at: now, rows };
+  }
+  const t0 = parseInt(String(seed).split('-')[0], 10);
+  const cutoff = Number.isFinite(t0) && t0 > 0 ? t0 : now;
+  const rows = _feedIdsCache.rows;
+  const pinned = [];
+  for (const r of rows) { if (+new Date(r.createdAt) <= cutoff) { pinned.push(r); if (pinned.length === 3) break; } }
+  const pinnedIds = new Set(pinned.map((r) => String(r._id)));
+  const rest = rows
+    .filter((r) => !pinnedIds.has(String(r._id)))
+    .map((r) => ({ id: String(r._id), k: _feedHash(`${seed}:${r._id}`) }))
+    .sort((a, b) => (a.k - b.k) || (a.id < b.id ? -1 : 1));
+  const order = [...pinned.map((r) => String(r._id)), ...rest.map((r) => r.id)].slice(skip, skip + limit);
+  if (!order.length) return [];
+  const docs = await Post.find({ _id: { $in: order }, deleted: { $ne: true } }).lean();
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+  return order.map((id) => byId.get(id)).filter(Boolean);
+}
+
 async function getPostsByAuthor(authorId, skip = 0, limit = 20) {
   return Post.find({ authorId, deleted: { $ne: true } })
     .sort({ createdAt: -1 })
@@ -948,7 +999,7 @@ module.exports = {
   connect,
   User, Session, Conversation, Message, Notification, Report, Post, PostLike,
   createUser, findUserByUsername, findUserById, findUsersByIds,
-  updateUserLastSeen, updateUserOnlineStatus, updateUserSettings,
+  updateUserLastSeen, updateUserOnlineStatus, setUserOffline, PRESENCE_FRESH_MS, resetAllOnline, updateUserSettings,
   updateUserPassword, updateUsername, blockUser, unblockUser,
   addFcmToken, removeFcmToken, removeFcmTokens, deleteUserAccount,
   searchUsers, getOnlineUsers, getAllUsersAdmin, updateUserRole,
@@ -968,7 +1019,7 @@ module.exports = {
   markAllNotificationsRead, getUnreadNotificationCount, deleteAllNotifications, consumeNotifications,
   createReport, getReports, updateReportStatus,
   searchPosts, getUserPostStats, getMessageByClientId,
-  createPost, getPosts, getPostsByAuthor, getPostById, getPostsByIds, deletePost,
+  createPost, getPosts, getPostsShuffled, getPostsByAuthor, getPostById, getPostsByIds, deletePost,
   getAllUserIdsExcept, createNotificationsBulk,
   createStory, getActiveStories, getStoryById, getUserActiveStories, addStoryView, deleteStory,
   togglePostLike, getLikedPostIds, createSharedPost, incrementPostShares,

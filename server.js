@@ -9,11 +9,13 @@ const crypto = require('crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const db = require('./database.js');
 const sec = require('./security.js');
 const chatMedia = require('./chat-media.js');
+const protoApi = require('./proto-api.js');
 
 const app = express();
 // Render (et tout hébergeur derrière un reverse proxy) : sans ceci, req.ip est l'IP du proxy,
@@ -22,8 +24,9 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: false },
-  pingTimeout: 30000,
-  pingInterval: 25000,
+  pingTimeout: 10000,
+  pingInterval: 8000,
+  perMessageDeflate: false,
 });
 
 const PORT = process.env.PORT || 3000;
@@ -99,18 +102,23 @@ async function sendPushNotification(userId, tokens, title, body, data = {}) {
 }
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
+// Compression gzip/brotli des réponses HTML/JS/CSS/JSON (index.html, scripts, API) : réduit fortement les octets sur mobile.
+// Socket.IO (WebSocket) n'est pas concerné. Si le module n'est pas installé, le serveur démarre quand même.
+try { const compression = require('compression'); app.use(compression({ threshold: 1024 })); } catch (_) { console.warn('[perf] module "compression" absent : npm install'); }
 app.use(sec.securityHeaders);
 app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
+// Les réponses de l'API ne doivent JAMAIS être mises en cache (statuts « en ligne », « vu à… », conversations) : sinon le navigateur/proxy rejoue d'anciennes données.
+app.use('/api', (req, res, next) => { if (req.method === 'GET') res.setHeader('Cache-Control', 'no-store'); next(); });
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js','/bg-data.js','/bg-p0.jpg','/bg-p1.jpg','/bg-p2.jpg','/bg-p3.jpg','/bg-p4.jpg','/bg-p5.jpg','/bgt-p0.jpg','/bgt-p1.jpg','/bgt-p2.jpg','/bgt-p3.jpg','/bgt-p4.jpg','/bgt-p5.jpg'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,
     // ce qui laissait les navigateurs sur l'ancienne interface pendant 1 h après chaque mise à jour.
     if (file.endsWith('.css') || file.endsWith('.js')) res.setHeader('Cache-Control', 'no-cache');
-    else res.setHeader('Cache-Control', `public, max-age=${file.endsWith('.png') ? 86400 : 0}`);
+    else res.setHeader('Cache-Control', `public, max-age=${/\.(png|jpg)$/.test(file) ? 604800 : 0}`);
     res.sendFile(path.join(__dirname, file));
   });
 });
@@ -127,9 +135,11 @@ const jexcity = require('./city-server.js');
 jexcity.mountStatic(app);
 
 app.use(sec.apiLimiter);
+protoApi.early(app, sec, db);
 
 // JexAi (module additif) : POST /api/jexai, GET /api/jexai/status
 require('./jexai.js').mount(app, sec);
+require('./reels.js').mount(app, sec); // page Reels (vidéos courtes) : GET /api/reels, POST /api/reels/event
 
 // Remarque : style.css et script.js (ancienne interface) restent servis
 // tels quels ci-dessus car admin.html et informations.html en dépendent
@@ -390,7 +400,7 @@ app.delete('/api/sessions', sec.requireAuth, async (req, res) => {
 // ─── User Routes ───────────────────────────────────────────────────────────────
 app.get('/api/users/online', sec.requireAuth, async (req, res) => {
   try {
-    const users = await db.getOnlineUsers(30);
+    const users = await db.getOnlineUsers(30, [...onlineUsers.keys()]);
     return res.json(users.map(safeUser));
   } catch (err) {
     return res.status(500).json({ error: 'Erreur.' });
@@ -959,29 +969,34 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
     }
     if (imageClaim) await chatMedia.attach(imageClaim._id, message._id);
     if (safeSharedPostId) await db.incrementPostShares(safeSharedPostId);
-    await db.updateConversationLastMessage(req.params.id, {
-      content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
-      senderId: req.user._id,
-      type: msgType,
-      createdAt: message.createdAt,
-    });
-    // Un nouveau message fait réapparaître la conversation chez tout
-    // participant qui l'avait supprimée de sa propre liste.
-    await db.unhideConversationForAll(req.params.id);
-
-    const sender = await db.findUserById(req.user._id);
-    const [msgOutBase] = (safeSharedPostId || replyToId) ? await enrichMessages([message]) : [safeMessage(message)];
+    const sender = req.user; // déjà chargé par requireAuth : inutile de le relire en base
+    const senderIdStr = req.user._id.toString();
+    const otherIds = conv.members.map((m) => m.toString()).filter((m) => m !== senderIdStr);
+    // Écritures indépendantes lancées EN PARALLÈLE (avant : 4 allers-retours base à la suite avant l'émission).
+    // Un nouveau message fait aussi réapparaître la conversation chez tout participant qui l'avait supprimée.
+    const [[msgOutBase]] = await Promise.all([
+      (safeSharedPostId || replyToId) ? enrichMessages([message]) : Promise.resolve([safeMessage(message)]),
+      db.updateConversationLastMessage(req.params.id, {
+        content: msgType === 'shared_post' ? (safeContent || 'a partagé une publication') : (safeContent || safeUrl || msgType),
+        senderId: req.user._id,
+        type: msgType,
+        createdAt: message.createdAt,
+      }),
+      db.unhideConversationForAll(req.params.id),
+      ...otherIds.map((mid) => db.incrementUnread(req.params.id, mid)),
+    ]);
     const msgOut = {
       ...msgOutBase,
       sender: safeUser(sender),
     };
 
-    // Emit to all members
-    for (const memberId of conv.members) {
-      const mid = memberId.toString();
-      io.to(`user:${mid}`).emit('new_message', msgOut);
-      if (mid !== req.user._id.toString()) {
-        await db.incrementUnread(req.params.id, mid);
+    // Émission immédiate à tous les membres, puis réponse à l'expéditeur SANS attendre notifications/push
+    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
+    res.status(201).json(msgOut);
+
+    // Notifications internes + push en arrière-plan (n'impactent plus le délai d'envoi)
+    try {
+      for (const mid of otherIds) {
         // Notification (sauf si le destinataire a déjà cette conversation
         // ouverte : il voit le message arriver en direct via 'new_message').
         const member = await db.findUserById(mid);
@@ -1007,9 +1022,10 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
           }
         }
       }
+    } catch (e) {
+      console.error('[Message:notif]', e.message);
     }
-
-    return res.status(201).json(msgOut);
+    return;
   } catch (err) {
     console.error('[Message]', err.message);
     return res.status(500).json({ error: 'Erreur.' });
@@ -1124,8 +1140,10 @@ app.post('/api/conversations/:id/seen', sec.requireAuth, async (req, res) => {
     if (!conv || !conv.members.map(String).includes(req.user._id.toString())) {
       return res.status(403).json({ error: 'Accès non autorisé.' });
     }
-    await db.markMessagesSeen(req.params.id, req.user._id, new Date());
-    await db.resetUnread(req.params.id, req.user._id);
+    await Promise.all([
+      db.markMessagesSeen(req.params.id, req.user._id, new Date()),
+      db.resetUnread(req.params.id, req.user._id),
+    ]);
     for (const m of conv.members) {
       io.to(`user:${m.toString()}`).emit('messages_seen', {
         conversationId: req.params.id,
@@ -1625,23 +1643,27 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
       seenBy: [req.user._id],
     });
     await db.incrementPostShares(rootId);
-    await db.updateConversationLastMessage(req.body.conversationId, {
-      content: descResult.value || 'a partagé une publication',
-      senderId: req.user._id,
-      type: 'shared_post',
-      createdAt: message.createdAt,
-    });
-    await db.unhideConversationForAll(req.body.conversationId);
-
-    const sender = await db.findUserById(req.user._id);
-    const [msgOutBase] = await enrichMessages([message]);
+    const sender = req.user; // déjà chargé par requireAuth
+    const senderIdStr = req.user._id.toString();
+    const otherIds = conv.members.map((m) => m.toString()).filter((m) => m !== senderIdStr);
+    const [[msgOutBase]] = await Promise.all([
+      enrichMessages([message]),
+      db.updateConversationLastMessage(req.body.conversationId, {
+        content: descResult.value || 'a partagé une publication',
+        senderId: req.user._id,
+        type: 'shared_post',
+        createdAt: message.createdAt,
+      }),
+      db.unhideConversationForAll(req.body.conversationId),
+      ...otherIds.map((mid) => db.incrementUnread(req.body.conversationId, mid)),
+    ]);
     const msgOut = { ...msgOutBase, sender: safeUser(sender) };
 
-    for (const memberId of conv.members) {
-      const mid = memberId.toString();
-      io.to(`user:${mid}`).emit('new_message', msgOut);
-      if (mid !== req.user._id.toString()) {
-        await db.incrementUnread(req.body.conversationId, mid);
+    for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
+    res.status(201).json(msgOut);
+
+    try {
+      for (const mid of otherIds) {
         const member = await db.findUserById(mid);
         if (member && member.settings?.notifications !== false && !isMemberViewingConv(mid, req.body.conversationId)) {
           await db.createNotification({
@@ -1653,9 +1675,6 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
             content: `${req.user.username} a partagé une publication`.substring(0, 100),
           });
           io.to(`user:${mid}`).emit('notification', { count: 1 });
-          // Push notification (manquait ici : même chaîne que pour un message
-          // texte classique, pour que le partage d'une publication en
-          // conversation déclenche aussi une notification hors site).
           if (member.fcmTokens?.length) {
             await sendPushNotification(
               mid,
@@ -1667,9 +1686,10 @@ app.post('/api/posts/:id/share', sec.requireAuth, async (req, res) => {
           }
         }
       }
+    } catch (e) {
+      console.error('[Message:notif]', e.message);
     }
-
-    return res.status(201).json(msgOut);
+    return;
   } catch (err) {
     console.error('[Posts] share', err.message);
     return res.status(500).json({ error: 'Erreur.' });
@@ -1734,6 +1754,28 @@ app.delete('/api/posts/:id', sec.requireAuth, async (req, res) => {
 
 // ─── Admin Routes ──────────────────────────────────────────────────────────────
 const adminAuth = [sec.requireAuth, sec.requireRole(['ADMIN', 'OWNER', 'MODERATOR'])];
+
+// Configuration du site gérée par les admins : sites suggérés (barre latérale) et fonds de discussion.
+const SiteConfig = mongoose.models.SiteConfig || mongoose.model('SiteConfig', new mongoose.Schema({ key: { type: String, unique: true }, value: mongoose.Schema.Types.Mixed }, { minimize: false }));
+const cfgUrl = (u) => { try { const x = new URL(String(u || '').trim()); return x.protocol === 'https:' && x.href.length <= 500 && !/['"()\\\s]/.test(x.href) ? x.href : null; } catch { return null; } };
+const cfgTxt = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, ' ').trim().slice(0, n);
+const cleanSiteConfig = (b) => ({
+  sites: (Array.isArray(b && b.sites) ? b.sites : []).slice(0, 30).map((x) => ({ title: cfgTxt(x && x.title, 60), url: cfgUrl(x && x.url), desc: cfgTxt(x && x.desc, 160) })).filter((x) => x.title && x.url),
+  bgs: (Array.isArray(b && b.bgs) ? b.bgs : []).slice(0, 30).map((x) => ({ name: cfgTxt(x && x.name, 30), url: cfgUrl(x && x.url) })).filter((x) => x.name && x.url),
+});
+app.get('/api/site-config', sec.requireAuth, async (req, res) => {
+  try {
+    const d = await SiteConfig.findOne({ key: 'main' }).lean(), v = (d && d.value) || {}, roles = req.user.roles || [];
+    return res.json({ sites: v.sites || [], bgs: v.bgs || [], staff: roles.some((r) => ['ADMIN', 'OWNER', 'MODERATOR'].includes(r)), admin: roles.some((r) => ['ADMIN', 'OWNER'].includes(r)) });
+  } catch (err) { console.error('[SiteConfig] get', err.message); return res.status(500).json({ error: 'Erreur.' }); }
+});
+app.put('/api/admin/site-config', sec.requireAuth, sec.requireRole(['ADMIN', 'OWNER']), async (req, res) => {
+  try {
+    const v = cleanSiteConfig(req.body);
+    await SiteConfig.updateOne({ key: 'main' }, { $set: { value: v } }, { upsert: true });
+    return res.json(v);
+  } catch (err) { console.error('[SiteConfig] put', err.message); return res.status(500).json({ error: 'Erreur.' }); }
+});
 
 app.get('/api/admin/users', ...adminAuth, async (req, res) => {
   try {
@@ -1899,6 +1941,7 @@ app.get('/api/firebase-config', (req, res) => {
 
 // ─── Socket.IO ─────────────────────────────────────────────────────────────────
 const onlineUsers = new Map(); // userId -> Set of socketIds
+const onlineMeta = new Map(); // userId -> { username, show } (pour envoyer l'instantané de présence)
 
 // Vérifie si un membre a actuellement un socket dans la room de cette
 // conversation (c.-à-d. qu'il l'a ouverte), pour éviter de créer une
@@ -1927,42 +1970,42 @@ io.use(async (socket, next) => {
   next();
 });
 
-io.on('connection', async (socket) => {
+// Délai de grâce avant d'annoncer « hors ligne » : un rafraîchissement de page ou une micro-coupure
+// réseau ne fait plus clignoter le statut, et supprime la course « en ligne » / « hors ligne » en base.
+const offlineTimers = new Map(); // userId -> timer
+const OFFLINE_GRACE_MS = 3000;
+
+io.on('connection', (socket) => {
   const userId = socket.userId;
-  socket.join(`user:${userId}`);
+  const memberCache = new Map(); // conversationId -> expiration : évite une requête base par événement « écrit… »
+  const isConvMember = async (conversationId) => {
+    const hit = memberCache.get(conversationId);
+    if (hit && hit > Date.now()) return true;
+    const conv = await db.getConversationById(conversationId);
+    if (!conv || !conv.members.map(String).includes(userId)) return false;
+    memberCache.set(conversationId, Date.now() + 60000);
+    return true;
+  };
 
-  // Track online
-  if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
-  onlineUsers.get(userId).add(socket.id);
-  await db.updateUserOnlineStatus(userId, true);
-  if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
-
-  // ── Heartbeat ──
-  const heartbeatInterval = setInterval(async () => {
-    await db.updateUserLastSeen(userId, true);
-  }, 30000);
-
-  // ── Typing ──
+  // ── Handlers enregistrés TOUT DE SUITE (avant tout await) : sinon un join_conversation / typing
+  //    envoyé par le client dès la connexion était perdu pendant l'écriture en base. ──
   socket.on('typing_start', async (data) => {
     if (!sec.socketRateLimit(socket.id, 'typing', 30, 60000)) return;
     if (!data?.conversationId || !sec.isValidObjectId(data.conversationId)) return;
-    const conv = await db.getConversationById(data.conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(data.conversationId))) return;
     socket.to(`conv:${data.conversationId}`).emit('user_typing', { userId, username: socket.username, conversationId: data.conversationId });
   });
 
   socket.on('typing_stop', async (data) => {
     if (!data?.conversationId || !sec.isValidObjectId(data.conversationId)) return;
-    const conv = await db.getConversationById(data.conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(data.conversationId))) return;
     socket.to(`conv:${data.conversationId}`).emit('user_stopped_typing', { userId, conversationId: data.conversationId });
   });
 
   // ── Join conversation room ──
   socket.on('join_conversation', async (conversationId) => {
     if (!sec.isValidObjectId(conversationId)) return;
-    const conv = await db.getConversationById(conversationId);
-    if (!conv || !conv.members.map(String).includes(userId)) return;
+    if (!(await isConvMember(conversationId))) return;
     socket.join(`conv:${conversationId}`);
   });
 
@@ -1970,23 +2013,52 @@ io.on('connection', async (socket) => {
     if (conversationId) socket.leave(`conv:${conversationId}`);
   });
 
+  socket.join(`user:${userId}`);
+
+  // ── Présence : en ligne ──
+  const pendingOffline = offlineTimers.get(userId);
+  if (pendingOffline) { clearTimeout(pendingOffline); offlineTimers.delete(userId); } // revenu pendant le délai de grâce : personne n'a vu « hors ligne »
+  if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
+  onlineUsers.get(userId).add(socket.id);
+  db.updateUserOnlineStatus(userId, true).catch(() => {}); // écriture lancée sans bloquer la suite
+  onlineMeta.set(userId, { username: socket.username, show: socket.user?.settings?.privacy?.showOnlineStatus !== false });
+  // Instantané immédiat de ceux qui sont en ligne (ne dépend plus d'aucune lecture en base)
+  socket.emit('presence_snapshot', [...onlineUsers.keys()].filter((id) => id !== userId).map((id) => onlineMeta.get(id)).filter((m) => m && m.show).map((m) => m.username));
+  if (!pendingOffline && socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_online', { userId, username: socket.username });
+
+  // ── Heartbeat ──
+  const heartbeatInterval = setInterval(async () => {
+    if (!onlineUsers.get(userId)?.has(socket.id)) return; // évite qu'un battement tardif réécrive « en ligne » après la déconnexion
+    await db.updateUserLastSeen(userId, true).catch(() => {});
+  }, 30000);
+
   // ── Disconnect ──
-  socket.on('disconnect', async () => {
+  socket.on('disconnect', () => {
     clearInterval(heartbeatInterval);
     const sockets = onlineUsers.get(userId);
-    if (sockets) {
-      sockets.delete(socket.id);
-      if (sockets.size === 0) {
-        onlineUsers.delete(userId);
-        const lastSeen = new Date();
-        await db.updateUserOnlineStatus(userId, false);
-        if (socket.user?.settings?.privacy?.showOnlineStatus !== false) io.emit('user_offline', { userId, lastSeen });
-      }
-    }
+    if (!sockets) return;
+    sockets.delete(socket.id);
+    if (sockets.size > 0) return;
+    onlineUsers.delete(userId);
+    const lastSeen = new Date();
+    const showOnline = socket.user?.settings?.privacy?.showOnlineStatus !== false;
+    const timer = setTimeout(async () => {
+      offlineTimers.delete(userId);
+      if (onlineUsers.has(userId)) return; // reconnecté entre-temps
+      if (showOnline) io.emit('user_offline', { userId, username: socket.username, lastSeen });
+      await db.setUserOffline(userId, lastSeen).catch(() => {}); // date de déconnexion exacte (celle diffusée aux autres)
+    }, OFFLINE_GRACE_MS);
+    offlineTimers.set(userId, timer);
   });
 });
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+// En ligne = au moins un socket connecté (mémoire du serveur, fiable) ; à défaut, flag BDD avec battement récent (autre instance).
+function isUserOnline(user) {
+  if (!user || !user._id) return false;
+  if (onlineUsers.has(String(user._id))) return true;
+  return !!user.isOnline && !!user.lastSeen && (Date.now() - new Date(user.lastSeen).getTime()) < db.PRESENCE_FRESH_MS;
+}
 function safeUser(user) {
   if (!user) return null;
   const showOnline = user.settings?.privacy?.showOnlineStatus !== false;
@@ -1996,8 +2068,9 @@ function safeUser(user) {
     username: user.username,
     identity: user.identity,
     avatarUrl: user.avatarUrl || '',
-    isOnline: showOnline ? user.isOnline : false,
-    lastSeen: showLastSeen ? user.lastSeen : null,
+    isOnline: showOnline ? isUserOnline(user) : false,
+    // en ligne => pas de « dernière connexion » (sinon l'ancienne date de déconnexion s'affiche à tort)
+    lastSeen: showLastSeen && !(showOnline && isUserOnline(user)) ? user.lastSeen : null,
     roles: user.roles,
     settings: user.settings ? { theme: user.settings.theme, accentColor: user.settings.accentColor } : undefined,
   };
@@ -2136,6 +2209,7 @@ async function enrichConversations(convs, currentUserId) {
 }
 
 chatMedia.mount(app, sec, io, db);
+protoApi.mount(app, sec, io, db);
 
 // ─── Cleanup Jobs ──────────────────────────────────────────────────────────────
 setInterval(async () => {
@@ -2152,6 +2226,7 @@ async function start() {
   // Connect to MongoDB (non-fatal if it fails)
   try {
     await db.connect();
+    await db.resetAllOnline().catch(() => {}); // après un redémarrage, plus personne n'est réellement connecté
   } catch (err) {
     console.warn('[Start] DB connection failed, running in degraded mode:', err.message);
   }

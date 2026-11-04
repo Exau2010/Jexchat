@@ -110,7 +110,7 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 // Serve static files (CSS, JS frontend, logo)
-const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js','/bg-p0.jpg','/bg-p1.jpg','/bg-p2.jpg','/bg-p3.jpg','/bg-p4.jpg','/bg-p5.jpg','/bgt-p0.jpg','/bgt-p1.jpg','/bgt-p2.jpg','/bgt-p3.jpg','/bgt-p4.jpg','/bgt-p5.jpg'];
+const staticFiles = ['/style.css', '/script.js', '/logo.png', '/jexchat.css', '/app.js', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/jexai.css', '/jexai-widget.js', '/jexai-logo.png', '/story-desktop.css', '/story-desktop.js', '/story-editor.js','/bg-data.js','/bg-p0.jpg','/bg-p1.jpg','/bg-p2.jpg','/bg-p3.jpg','/bg-p4.jpg','/bg-p5.jpg','/bgt-p0.jpg','/bgt-p1.jpg','/bgt-p2.jpg','/bgt-p3.jpg','/bgt-p4.jpg','/bgt-p5.jpg'];
 staticFiles.forEach(file => {
   app.get(file, (req, res) => {
     // CSS/JS : revalidation à chaque chargement (ETag → réponse 304 très légère). Avant : max-age=3600,

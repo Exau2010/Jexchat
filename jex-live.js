@@ -327,7 +327,7 @@ async function loadConvs() { const l = await api('GET', '/api/conversations?limi
 let resyncBusy = 0, resyncAgain = 0;
 function markSeen(id, n) { // « vu » : légèrement groupé, et relancé si la requête échoue (réseau, 429…)
   if (!n) { clearTimeout(markSeen.t); markSeen.t = setTimeout(() => markSeen(id, 1), 120); return; }
-  api('POST', `/api/conversations/${id}/seen`).catch(() => { if (n <= 3) setTimeout(() => { if (booted && cur === id && !document.hidden) markSeen(id, n + 1); }, [0, 2000, 5000, 10000][n]); });
+  api('POST', `/api/conversations/${id}/seen`).then(() => { const k = NT.length; for (let i = NT.length - 1; i >= 0; i--) if (NT[i].t === 'msg' && NT[i].cid === String(id)) NT.splice(i, 1); if (NT.length !== k) { try { renderNotif(true); nBadge(); } catch {} } }).catch(() => { if (n <= 3) setTimeout(() => { if (booted && cur === id && !document.hidden) markSeen(id, n + 1); }, [0, 2000, 5000, 10000][n]); });
 }
 async function resync() { // rattrape ce qui a été manqué pendant une coupure du socket (veille du téléphone, réseau instable)
   if (!booted) return;
@@ -356,7 +356,7 @@ async function resync() { // rattrape ce qui a été manqué pendant une coupure
 let sockUp = false;
 document.addEventListener('visibilitychange', () => { if (document.hidden || !booted) return; const c0 = cur && cv(); if (c0 && c0.dirty) { c0.dirty = 0; th2(); } if (SOCK && !SOCK.connected) SOCK.connect(); resync(); });
 addEventListener('online', () => { if (booted && SOCK && !SOCK.connected) SOCK.connect(); });
-setInterval(() => { if (booted && SOCK && !SOCK.connected && !document.hidden) resync(); }, 15000);
+setInterval(() => { if (booted && SOCK && !SOCK.connected && !document.hidden) resync(); }, 4000); // socket coupé : rattrapage toutes les 4 s (au lieu de 15 s)
 async function loadMsgs(c) { const l = await api('GET', `/api/conversations/${c.id}/messages?limit=50`); c.ms = l.filter((m) => !m.expired && m.type !== 'expired').map(mapMsg).sort((a, b) => a.t - b.t); c.loaded = 1; }
 const _open = openConv;
 openConv = function (id) {
@@ -536,7 +536,7 @@ function connectSocket() {
   ['group_created', 'group_updated', 'conversation_deleted', 'removed_from_group'].forEach((ev) => SOCK.on(ev, () => { refresh().then?.(() => {}); if (cur && cv() && ev === 'group_updated') drw && $('#dr').classList.contains('on') && drw(); }));
   SOCK.on('background_changed', (r) => { const c = cOf(r.conversationId); if (c) { applyBg(c, r.background); if (cur === c.id) { $('#tr').setAttribute('style', bgc(c)); bgImg(); } } });
   SOCK.on('account_deleted', kick);
-  SOCK.on('notification', () => { clearTimeout(notifT); notifT = setTimeout(() => loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}), 400); });
+  SOCK.on('notification', (r) => { if (r && r.conversationId && cur === String(r.conversationId) && !document.hidden) { markSeen(cur); return; } clearTimeout(notifT); notifT = setTimeout(() => loadNotifs().then(() => { renderNotif(true); nBadge(); }).catch(() => {}), 400); });
   SOCK.on('post_created', (r) => { if (booted && String(r.author.id) !== String(MEID)) addPost(r); });
   SOCK.on('post_liked', (r) => { document.querySelectorAll(`.post[data-id="${r.postId}"]`).forEach((a) => { const b = a.querySelector('.act[onclick^="lk("]'); if (!b) return; const on = b.classList.contains('on'); b.setAttribute('onclick', `lk(this,${r.likesCount - (on ? 1 : 0)})`); b.querySelector('span').textContent = fm(r.likesCount); }); });
   SOCK.on('post_deleted', (r) => { const a = document.querySelector(`.post[data-id="${r.postId}"]`); if (a) a.remove(); });
@@ -550,7 +550,7 @@ TY.post = ['cam', '#0A9ED9', 'a publié une nouvelle publication']; TY.system = 
 const NMAP = { like: 'like', follow: 'follow', mention: 'mention', message: 'msg', story: 'story', post: 'post', share: 'share', comment: 'comment', system: 'system', group_invite: 'system' };
 async function loadNotifs() {
   const l = await api('GET', '/api/notifs'); NT.length = 0;
-  l.forEach((n) => { if (n.from) reg(n.from); const t = NMAP[n.type] || 'system'; NT.push({ id: n.id, t, who: n.from ? n.from.username : 'JexChat', ts: +new Date(n.createdAt), u: n.read ? 0 : 1, th: n.thumb || '', q: ['msg', 'mention', 'comment'].includes(t) && n.content ? n.content.slice(0, 120) : (t === 'system' ? n.content : undefined) }); });
+  l.forEach((n) => { if (n.from) reg(n.from); const t = NMAP[n.type] || 'system'; NT.push({ id: n.id, cid: n.conversationId ? String(n.conversationId) : '', t, who: n.from ? n.from.username : 'JexChat', ts: +new Date(n.createdAt), u: n.read ? 0 : 1, th: n.thumb || '', q: ['msg', 'mention', 'comment'].includes(t) && n.content ? n.content.slice(0, 120) : (t === 'system' ? n.content : undefined) }); });
 }
 document.addEventListener('click', (e) => {
   const x = e.target.closest('[data-pg]'); if (!x) return; const a = x.dataset.pg, id = x.dataset.id || (x.closest('.ni') || { dataset: {} }).dataset.id;
@@ -655,7 +655,6 @@ document.addEventListener('change', (e) => {
   else if (k === 'priv') { /* enregistré via pPersist */ }
   else api('PUT', '/api/me/profile', { [k]: v }).catch((z) => { rb(); T(z.message); });
 }, true);
-document.addEventListener('click', (e) => { if (e.target.closest('[data-jc="enter"],[data-jc="zone"]')) { e.stopImmediatePropagation(); location.href = '/city'; } }, true);
 
 /* ---------- Explorer ---------- */
 const CATS = { Nature: /nature|montagne|forêt|foret|arbre|paysage|mer|plage|ciel/i, Animaux: /animaux|animal|chat|chien|oiseau/i, Fleurs: /fleur|rose|tulipe|jardin/i };

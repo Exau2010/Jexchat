@@ -130,10 +130,6 @@ app.get('/manifest.webmanifest', (req, res) => {
   res.sendFile(path.join(__dirname, 'manifest.webmanifest'));
 });
 
-// JexCity (module additif) : fichiers statiques de /city, avant le limiteur d'API.
-const jexcity = require('./city-server.js');
-jexcity.mountStatic(app);
-
 app.use(sec.apiLimiter);
 protoApi.early(app, sec, db);
 
@@ -1009,7 +1005,7 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
             messageId: message._id,
             content: `${req.user.username}: ${safeContent || msgType}`.substring(0, 100),
           });
-          io.to(`user:${mid}`).emit('notification', { count: 1 });
+          io.to(`user:${mid}`).emit('notification', { count: 1, conversationId: req.params.id });
           // Push notification
           if (member.fcmTokens?.length) {
             await sendPushNotification(
@@ -1143,6 +1139,7 @@ app.post('/api/conversations/:id/seen', sec.requireAuth, async (req, res) => {
     await Promise.all([
       db.markMessagesSeen(req.params.id, req.user._id, new Date()),
       db.resetUnread(req.params.id, req.user._id),
+      db.Notification.deleteMany({ userId: req.user._id, type: 'message', conversationId: req.params.id }).catch(() => {}),
     ]);
     for (const m of conv.members) {
       io.to(`user:${m.toString()}`).emit('messages_seen', {
@@ -1922,9 +1919,6 @@ app.delete('/api/admin/messages/:id', ...adminAuth, async (req, res) => {
 });
 
 // ─── Health ────────────────────────────────────────────────────────────────────
-// JexCity : routes /api/city/* et présence temps réel (events city:*). Réutilise db, sec et les push existants.
-jexcity.mountApi({ app, io, db, sec, sendPushNotification });
-
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'jexchat' }));
 
 // ─── Firebase Config (public, safe) ───────────────────────────────────────────

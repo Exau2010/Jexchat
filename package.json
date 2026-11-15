@@ -8,8 +8,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "test:city": "node city-geo_test.mjs; node city-server_test.js && node city-arena_test.mjs && node city-cinema_test.mjs && node city-party_test.js"
+    "dev": "node server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

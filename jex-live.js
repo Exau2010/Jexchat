@@ -51,7 +51,7 @@ async function loadProfile() {
 async function enter(rem, isNew) {
   await loadProfile(); setSess({ u: ME }, rem);
   $('#auth').classList.add('out'); setTimeout(() => { $('#auth').hidden = true; $('#auth').classList.remove('out'); }, 300);
-  booted = true; try { connectSocket(); } catch {} await bootData(); go('home'); renderProf(); renderAcct();
+  booted = true; try { connectSocket(); } catch (e) { console.error('[JexChat] connectSocket :', e); } await bootData(); go('home'); renderProf(); renderAcct();
   T(isNew ? 'Bienvenue sur JexChat, ' + PD.name.split(' ')[0] + ' 🎉' : 'Connexion réussie');
 }
 aSubmit = async function () {
@@ -507,9 +507,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && bo
 window.addEventListener('online', () => { if (booted) { try { if (SOCK && !SOCK.connected) SOCK.connect(); } catch {} resync(); } });
 /* ---------- Temps réel ---------- */
 function connectSocket() {
-  if (SOCK) SOCK.disconnect(); sockUp = false; if (typeof io === 'undefined') return;
-  SOCK = io({ withCredentials: true, transports: ['websocket', 'polling'], reconnectionDelay: 500, reconnectionDelayMax: 3000 });
+  if (SOCK) SOCK.disconnect(); sockUp = false; if (typeof window.io !== 'function') { console.error('[JexChat] Socket.IO indisponible (window.io=' + typeof window.io + ') : temps réel désactivé'); return; }
+  SOCK = window.io({ withCredentials: true, transports: ['websocket', 'polling'], reconnectionDelay: 500, reconnectionDelayMax: 3000 });
   const cOf = (id) => D.find((c) => c.id === String(id));
+  SOCK.on('connect_error', (e) => console.warn('[JexChat] socket : échec de connexion —', e && e.message));
   SOCK.on('new_message', async (msg) => {
     let c = cOf(msg.conversationId);
     if (!c) { try { c = mapConv(await api('GET', '/api/conversations/' + msg.conversationId)); } catch { return; } }
@@ -762,7 +763,7 @@ addEventListener('online', () => { if (booted) loadConvs().then(renderList).catc
   ME = me.username; MEID = me.id; ACCS[ME] = ACCS[ME] || { name: ME, handle: ME, email: '', created: (me.createdAt || '').slice(0, 10) }; setSess({ u: ME }, true);
   try { await loadProfile(); } catch (e) { PD.name = PD.name || ME; PD.handle = ME; AVM[ME] = me.avatarUrl || ''; PD.av = me.avatarUrl || null; }
   $('#auth').hidden = true; booted = true;
-  try { connectSocket(); } catch {}
+  try { connectSocket(); } catch (e) { console.error('[JexChat] connectSocket :', e); }
   try { await bootData(); } catch {}
   try { renderAcct(); pushSetup(false); } catch {}
   if (/^\/messages/.test(location.pathname)) go('msg'); else if (/^\/settings/.test(location.pathname)) go('acct'); else if (/^\/lapage\//.test(location.pathname)) go('prof');

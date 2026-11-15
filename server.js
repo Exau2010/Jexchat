@@ -939,6 +939,7 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       }
     }
 
+    const _tMsg = Date.now();
     const msgData = {
       conversationId: req.params.id,
       senderId: req.user._id,
@@ -989,6 +990,13 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
     // Émission immédiate à tous les membres, puis réponse à l'expéditeur SANS attendre notifications/push
     for (const memberId of conv.members) io.to(`user:${memberId.toString()}`).emit('new_message', msgOut);
     res.status(201).json(msgOut);
+    {
+      const _ms = Date.now() - _tMsg;
+      const _off = otherIds.filter((m) => !(onlineUsers.get(m)?.size));
+      if (_off.length) diag('message de', req.user.username, ': destinataire(s) SANS socket ouvert (', _off.length, ') → ne verra le message qu\'au rafraîchissement ; vérifier côté client la connexion socket');
+      if (_ms > 800) diag('message LENT :', _ms, 'ms entre création en base et émission → base de données lente ?');
+      else if (process.env.DIAG) diag('message OK :', _ms, 'ms ; destinataires avec socket', otherIds.length - _off.length, '/', otherIds.length);
+    }
 
     // Notifications internes + push en arrière-plan (n'impactent plus le délai d'envoi)
     try {
@@ -1919,7 +1927,7 @@ app.delete('/api/admin/messages/:id', ...adminAuth, async (req, res) => {
 });
 
 // ─── Health ────────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'jexchat' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'jexchat', sockets: io.engine.clientsCount, usersOnline: onlineUsers.size }));
 
 // ─── Firebase Config (public, safe) ───────────────────────────────────────────
 app.get('/api/firebase-config', (req, res) => {
@@ -1952,12 +1960,16 @@ function isMemberViewingConv(memberId, conversationId) {
   return false;
 }
 
+// ── Diagnostic : repérer d'où vient un problème de temps réel (lignes « [DIAG] » dans les logs Render) ──
+const diag = (...a) => console.log('[DIAG]', ...a);
+io.engine.on('connection_error', (err) => diag('Socket.IO connexion refusée au niveau moteur · code', err.code, '·', err.message));
+
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.cookie
     ?.split(';').find(c => c.trim().startsWith('jexchat_session='))?.split('=')[1];
-  if (!token) return next(new Error('Non authentifié'));
+  if (!token) { diag('socket REFUSÉ : aucun cookie jexchat_session reçu (ip ' + (socket.handshake.address || '?') + ')'); return next(new Error('Non authentifié')); }
   const user = await sec.authenticateSocket(socket, token);
-  if (!user) return next(new Error('Session invalide'));
+  if (!user) { diag('socket REFUSÉ : session introuvable en base, ou compte banni/suspendu'); return next(new Error('Session invalide')); }
   socket.userId = user._id.toString();
   socket.username = user.username;
   socket.user = user;
@@ -2008,6 +2020,7 @@ io.on('connection', (socket) => {
   });
 
   socket.join(`user:${userId}`);
+  diag('socket CONNECTÉ :', socket.username, '· transport', socket.conn.transport.name, '· sockets de cet utilisateur', (onlineUsers.get(userId)?.size || 0) + 1, '· utilisateurs en ligne', onlineUsers.size + (onlineUsers.has(userId) ? 0 : 1));
 
   // ── Présence : en ligne ──
   const pendingOffline = offlineTimers.get(userId);
@@ -2027,7 +2040,8 @@ io.on('connection', (socket) => {
   }, 30000);
 
   // ── Disconnect ──
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    diag('socket FERMÉ :', socket.username, '· raison', reason);
     clearInterval(heartbeatInterval);
     const sockets = onlineUsers.get(userId);
     if (!sockets) return;
@@ -2039,6 +2053,7 @@ io.on('connection', (socket) => {
     const timer = setTimeout(async () => {
       offlineTimers.delete(userId);
       if (onlineUsers.has(userId)) return; // reconnecté entre-temps
+      diag('hors ligne ANNONCÉ :', socket.username);
       if (showOnline) io.emit('user_offline', { userId, username: socket.username, lastSeen });
       await db.setUserOffline(userId, lastSeen).catch(() => {}); // date de déconnexion exacte (celle diffusée aux autres)
     }, OFFLINE_GRACE_MS);

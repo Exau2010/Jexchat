@@ -122,7 +122,7 @@ const messageSchema = new mongoose.Schema({
   content: { type: String, default: '' },
   type: {
     type: String,
-    enum: ['text', 'link', 'image', 'video', 'audio', 'sticker', 'note', 'shared_post', 'expired'],
+    enum: ['text', 'link', 'image', 'video', 'audio', 'sticker', 'note', 'shared_post', 'file', 'expired'],
     default: 'text',
   },
   url: { type: String, default: '' },

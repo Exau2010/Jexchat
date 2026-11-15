@@ -12,6 +12,16 @@ const TTL_MS = 10 * 60 * 1000;
 const PENDING_MS = 2 * 60 * 1000; // un envoi non terminé après 2 min est nettoyé
 const SWEEP_MS = 30 * 1000;
 const URL_PREFIX = '/api/chat-images/';
+// Documents (PDF, Word…) : même circuit que les images (mêmes 5 places, même bucket privé), durée de vie plus longue.
+const FILE_PREFIX = '/api/chat-files/';
+const FILE_MAX_BYTES = 10 * 1024 * 1024;
+const FILE_TTL_MS = 60 * 60 * 1000;
+const DOC_TYPES = {
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
 
 const schema = new mongoose.Schema({
   conversationId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
@@ -19,6 +29,8 @@ const schema = new mongoose.Schema({
   messageId: { type: mongoose.Schema.Types.ObjectId, default: null },
   path: { type: String, required: true },
   mime: { type: String, required: true },
+  kind: { type: String, enum: ['image', 'file'], default: 'image' },
+  name: { type: String, default: '' },
   size: { type: Number, default: 0 },
   slot: { type: Number, default: undefined }, // 0..4 tant que l'image occupe une place ; retiré à l'expiration/suppression
   status: { type: String, enum: ['pending', 'active'], default: 'pending' },
@@ -108,10 +120,10 @@ async function removeByMessage(messageId, io, db) {
 }
 
 // Appelé par POST /messages : valide qu'une image téléversée peut être rattachée à ce message.
-async function claim(imageId, userId, conversationId) {
+async function claim(imageId, userId, conversationId, kind = 'image') {
   if (!mongoose.isValidObjectId(imageId)) return null;
   return ChatImage.findOneAndUpdate(
-    { _id: imageId, senderId: userId, conversationId, status: 'active', messageId: null, expiresAt: { $gt: new Date() } },
+    { _id: imageId, senderId: userId, conversationId, kind: kind === 'file' ? 'file' : { $ne: 'file' }, status: 'active', messageId: null, expiresAt: { $gt: new Date() } },
     { $set: { messageId: new mongoose.Types.ObjectId() } }, // marque « pris » ; l'id réel est posé par attach()
     { new: true }
   );
@@ -119,6 +131,7 @@ async function claim(imageId, userId, conversationId) {
 async function attach(imageId, messageId) { await ChatImage.updateOne({ _id: imageId }, { $set: { messageId } }); }
 async function release(imageId) { await ChatImage.updateOne({ _id: imageId }, { $set: { messageId: null } }); }
 const urlFor = (id) => URL_PREFIX + id;
+const fileUrlFor = (id) => FILE_PREFIX + id;
 
 function mount(app, sec, io, db) {
   const raw = require('express').raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'application/octet-stream'], limit: MAX_BYTES });
@@ -165,7 +178,8 @@ function mount(app, sec, io, db) {
     try {
       if (!mongoose.isValidObjectId(req.params.imageId) || !supa()) return res.status(404).end();
       const img = await ChatImage.findById(req.params.imageId).lean();
-      if (!img || img.status !== 'active' || +img.expiresAt <= Date.now()) return res.status(410).json({ error: 'Image expirée.' });
+      if (!img || img.kind === 'file') return res.status(404).end();
+      if (img.status !== 'active' || +img.expiresAt <= Date.now()) return res.status(410).json({ error: 'Image expirée.' });
       const conv = await db.getConversationById(img.conversationId);
       if (!conv || !conv.members.map(String).includes(req.user._id.toString())) return res.status(403).end();
       const secs = Math.max(1, Math.min(30, Math.floor((+img.expiresAt - Date.now()) / 1000)));
@@ -176,9 +190,81 @@ function mount(app, sec, io, db) {
     } catch (e) { return res.status(500).end(); }
   });
 
+
+  /* ---------- Documents de discussion ---------- */
+  const rawDoc = require('express').raw({ type: () => true, limit: FILE_MAX_BYTES });
+  const docLimiter = sec.createRateLimiter(10, 60 * 1000, (r) => (r.user?._id || r.ip) + ':doc');
+  const cleanName = (n) => String(n || '').replace(/[\u0000-\u001f\u007f\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(-100);
+  function checkDoc(buf, ext) {
+    if (ext === 'pdf') return buf.slice(0, 5).toString('latin1') === '%PDF-';
+    if (ext === 'docx' || ext === 'xlsx' || ext === 'pptx') return buf.length > 30 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04 && buf.includes('[Content_Types].xml');
+    return !buf.slice(0, 8192).includes(0); // txt / md / csv : texte uniquement
+  }
+
+  app.post('/api/conversations/:id/files', sec.requireAuth, docLimiter, rawDoc, async (req, res) => {
+    let rec = null;
+    try {
+      if (!supa()) return res.status(503).json({ error: 'Envoi de documents non configuré (SUPABASE_URL / SUPABASE_SECRET_KEY).' });
+      if (!sec.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'ID invalide.' });
+      const conv = await db.getConversationById(req.params.id);
+      if (!conv || !conv.members.map(String).includes(req.user._id.toString())) return res.status(403).json({ error: 'Accès non autorisé.' });
+      if (conv.type === 'private') {
+        const me = await db.findUserById(req.user._id);
+        const otherId = conv.members.map(String).find((m) => m !== req.user._id.toString());
+        const other = await db.findUserById(otherId);
+        if (me.blockedUsers?.map(String).includes(otherId) || other?.blockedUsers?.map(String).includes(req.user._id.toString())) return res.status(403).json({ error: 'Action non autorisée.' });
+      }
+      const buf = req.body;
+      if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'Document manquant.' });
+      if (buf.length > FILE_MAX_BYTES) return res.status(413).json({ error: 'Document trop lourd (10 Mo max).' });
+      const name = cleanName(req.query.name) || 'document';
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (!DOC_TYPES[ext] || !checkDoc(buf, ext)) return res.status(415).json({ error: 'Format non autorisé (PDF, Word, Excel, PowerPoint, TXT, CSV ou MD).' });
+
+      const objectPath = `${req.params.id}/${crypto.randomBytes(16).toString('hex')}.${ext}`;
+      rec = await reserve(req.params.id, req.user._id, { path: objectPath, mime: DOC_TYPES[ext], size: buf.length, kind: 'file', name });
+      if (!rec) return res.status(409).json({ error: 'Limite atteinte : 5 médias actifs dans cette conversation. Réessayez quand l’un aura expiré.' });
+
+      const { error } = await supa().storage.from(BUCKET).upload(objectPath, buf, { contentType: DOC_TYPES[ext], upsert: false, cacheControl: '60' });
+      if (error) { await ChatImage.deleteOne({ _id: rec._id }); rec = null; console.warn('[ChatMedia] upload doc:', error.message); return res.status(502).json({ error: 'Échec de l’envoi du document. Réessayez.' }); }
+
+      const expiresAt = new Date(Date.now() + FILE_TTL_MS);
+      await ChatImage.updateOne({ _id: rec._id }, { $set: { status: 'active', expiresAt } });
+      return res.status(201).json({ imageId: rec._id, name, expiresAt });
+    } catch (e) {
+      console.error('[ChatMedia] doc', e.message);
+      if (rec) { await ChatImage.updateOne({ _id: rec._id }, { $set: { expiresAt: new Date() } }).catch(() => {}); }
+      return res.status(500).json({ error: 'Erreur.' });
+    }
+  });
+
+  // Lecture (aperçu) ou téléchargement (?dl=1) : le serveur relaie le fichier après contrôle des droits et de l'expiration.
+  app.get(FILE_PREFIX + ':fileId', sec.requireAuth, async (req, res) => {
+    try {
+      if (!mongoose.isValidObjectId(req.params.fileId) || !supa()) return res.status(404).end();
+      const f = await ChatImage.findById(req.params.fileId).lean();
+      if (!f || f.kind !== 'file') return res.status(404).end();
+      if (f.status !== 'active' || +f.expiresAt <= Date.now()) return res.status(410).json({ error: 'Document expiré.' });
+      const conv = await db.getConversationById(f.conversationId);
+      if (!conv || !conv.members.map(String).includes(req.user._id.toString())) return res.status(403).end();
+      const { data, error } = await supa().storage.from(BUCKET).download(f.path);
+      if (error || !data) return res.status(502).end();
+      const buf = Buffer.from(await data.arrayBuffer());
+      const dl = req.query.dl === '1', safeName = encodeURIComponent(f.name || 'document');
+      res.set({
+        'Content-Type': /^text\//.test(f.mime) ? 'text/plain; charset=utf-8' : f.mime,
+        'Content-Disposition': `${dl ? 'attachment' : 'inline'}; filename*=UTF-8''${safeName}`,
+        'Content-Length': String(buf.length),
+        'Cache-Control': 'private, no-store',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+      });
+      return res.end(buf);
+    } catch (e) { return res.status(500).end(); }
+  });
+
   sweep(io, db).catch((e) => console.warn('[ChatMedia] sweep:', e.message)); // rattrapage au démarrage
   const t = setInterval(() => sweep(io, db).catch((e) => console.warn('[ChatMedia] sweep:', e.message)), SWEEP_MS);
   t.unref?.();
 }
 
-module.exports = { mount, claim, attach, release, removeByMessage, urlFor, URL_PREFIX, _sniff: sniff };
+module.exports = { mount, claim, attach, release, removeByMessage, urlFor, fileUrlFor, URL_PREFIX, _sniff: sniff };

@@ -163,7 +163,7 @@ function validateReactionType(type) {
 }
 
 function validateMessageType(type) {
-  const allowed = ['text', 'link', 'image', 'video', 'audio', 'sticker', 'note', 'shared_post'];
+  const allowed = ['text', 'link', 'image', 'video', 'audio', 'sticker', 'note', 'shared_post', 'file'];
   if (!allowed.includes(type)) return { valid: false, error: 'Type de message invalide.' };
   return { valid: true };
 }
@@ -237,10 +237,10 @@ function securityHeaders(req, res, next) {
       "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdn.jsdelivr.net https://unpkg.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com",
       "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
-      "img-src 'self' data: https:",
+      "img-src 'self' data: blob: https:",
       "media-src 'self' https:",
       "connect-src 'self' wss: ws: https://www.googleapis.com https://firebaseinstallations.googleapis.com https://fcmregistrations.googleapis.com https://fcm.googleapis.com",
-      "worker-src 'self'",
+      "worker-src 'self' blob:",
       "frame-src https://www.youtube-nocookie.com https://player.vimeo.com",
     ].join('; ')
   );

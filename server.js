@@ -906,6 +906,11 @@ app.post('/api/conversations/:id/messages', sec.requireAuth, sec.messageLimiter,
       const contentResult = sec.validateMessage(content);
       if (!contentResult.valid) return res.status(400).json({ error: contentResult.error });
       safeContent = contentResult.value;
+    } else if (msgType === 'file') {
+      imageClaim = await chatMedia.claim(req.body.imageId, req.user._id, req.params.id, 'file');
+      if (!imageClaim) return res.status(410).json({ error: 'Document expiré ou invalide.' });
+      safeUrl = chatMedia.fileUrlFor(imageClaim._id);
+      safeContent = sec.sanitizeText(imageClaim.name || 'document').substring(0, 200);
     } else if (msgType === 'image' && req.body.imageId) {
       imageClaim = await chatMedia.claim(req.body.imageId, req.user._id, req.params.id);
       if (!imageClaim) return res.status(410).json({ error: 'Image expirée ou invalide.' });
@@ -1077,7 +1082,7 @@ app.delete('/api/messages/:id', sec.requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Accès non autorisé.' });
     }
     await db.deleteMessage(req.params.id);
-    if (message.type === 'image') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
+    if (message.type === 'image' || message.type === 'file') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
     for (const m of conv.members) {
       io.to(`user:${m.toString()}`).emit('message_deleted', { messageId: req.params.id, conversationId: message.conversationId });
     }
@@ -1913,7 +1918,7 @@ app.delete('/api/admin/messages/:id', ...adminAuth, async (req, res) => {
     const message = await db.getMessageById(req.params.id);
     if (!message) return res.status(404).json({ error: 'Message introuvable.' });
     await db.deleteMessage(req.params.id);
-    if (message.type === 'image') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
+    if (message.type === 'image' || message.type === 'file') await chatMedia.removeByMessage(message._id, io, db).catch(() => {});
     const conv = await db.getConversationById(message.conversationId);
     if (conv) {
       for (const m of conv.members) {

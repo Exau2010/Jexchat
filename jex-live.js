@@ -412,6 +412,18 @@ sendImg = async function () {
 function shrink(src, max, qual) {
   return new Promise((ok, ko) => { const im = new Image(), u = src; im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), cn = document.createElement('canvas'); cn.width = Math.round(im.width * k); cn.height = Math.round(im.height * k); cn.getContext('2d').drawImage(im, 0, 0, cn.width, cn.height); cn.toBlob((b) => (b ? ok(b) : ko(new Error('Image illisible.'))), 'image/jpeg', qual); }; im.onerror = () => ko(new Error('Image illisible.')); im.src = u; });
 }
+document.addEventListener('change', async (e) => { // documents (PDF, Word…) : envoi réel puis message de type « file »
+  if (e.target.id !== 'fdoc') return; const f = e.target.files[0]; e.target.value = ''; const c = cv(); if (!f || !c) return;
+  const ext = (f.name.split('.').pop() || '').toLowerCase();
+  if (!['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv'].includes(ext)) return T('Format non autorisé (PDF, Word, Excel, PowerPoint, TXT, CSV ou MD).');
+  if (f.size > 10e6) return T('Document trop lourd (10 Mo max).');
+  T('Envoi du document…');
+  try {
+    const r = await fetch(`/api/conversations/${c.id}/files?name=${encodeURIComponent(f.name)}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: f });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Envoi impossible.');
+    push(c, mm('me', d.name || f.name, 0, { type: 'file', url: '/api/chat-files/' + d.imageId, t: Date.now(), imageId: d.imageId }));
+  } catch (err) { T(err.message); }
+});
 document.addEventListener('change', (e) => { // conserve le fichier pour l'envoi réel (le gestionnaire d'origine garde l'aperçu)
   if (e.target.id !== 'fi') return; const f = e.target.files[0]; if (f) window.__jxFile = f;
 }, true);
